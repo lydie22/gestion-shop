@@ -45,7 +45,6 @@ export default function DashboardScreen() {
       <Card style={{ backgroundColor: colors.destructive, borderColor: colors.destructive, padding: 20, minHeight: 186 }}>
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={{ color: colors.heroMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>SOLDE ÉLECTRONIQUE THÉORIQUE</Text>
-          <Badge tone="success">DÉMO</Badge>
         </Row>
         <Text style={{ color: colors.primaryForeground, fontSize: 35, lineHeight: 42, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] }}>
           {formatMoney(operators.reduce((sum, operator) => sum + getWalletBalance(data, operator), 0), data.settings.currency)}
