@@ -1,0 +1,139 @@
+import { Feather } from '@expo/vector-icons';
+import React, { useState } from 'react';
+import { Alert, Text } from 'react-native';
+import { Button, Card, Field, Row, Screen, SectionTitle } from '@/components/shopflow/ui';
+import { Operator, operators, useShopFlow } from '@/context/ShopFlowContext';
+import { useColors } from '@/hooks/useColors';
+
+export default function SettingsScreen() {
+  const { data, updateSettings, updateReferenceBalances, resetDemo } = useShopFlow();
+  const colors = useColors();
+  const [shopName, setShopName] = useState(data.settings.shopName);
+  const [currency, setCurrency] = useState(data.settings.currency);
+  const [threshold, setThreshold] = useState((data.settings.discrepancyThresholdCents / 100).toFixed(2));
+  const [deviceName, setDeviceName] = useState(data.settings.deviceName);
+  const [referenceBalances, setReferenceBalances] = useState<Record<Operator, string>>({
+    'Airtel Money': (data.referenceBalances['Airtel Money'] / 100).toFixed(2),
+    'Orange Money': (data.referenceBalances['Orange Money'] / 100).toFixed(2),
+    'M-Pesa': (data.referenceBalances['M-Pesa'] / 100).toFixed(2),
+  });
+  const [referenceCash, setReferenceCash] = useState((data.referenceCashCents / 100).toFixed(2));
+  const [referenceSource, setReferenceSource] = useState('Comptage / relevé de référence saisi manuellement');
+
+  function savePreferences() {
+    const cents = Math.round(Number(threshold.replace(',', '.')) * 100);
+    if (shopName.trim().length < 2 || !Number.isFinite(cents) || cents < 0 || !/^[A-Z]{3}$/.test(currency.trim())) {
+      Alert.alert('Vérifie les champs', 'Nom de boutique requis, seuil positif ou nul et devise au format ISO de trois lettres.');
+      return;
+    }
+    updateSettings({
+      shopName: shopName.trim(),
+      currency: currency.trim().toUpperCase(),
+      discrepancyThresholdCents: cents,
+      deviceName: deviceName.trim() || 'Appareil local',
+    });
+    Alert.alert('Paramètres enregistrés', 'Les préférences sont conservées sur cet appareil.');
+  }
+
+  function saveReferences() {
+    const parsedReferences = {} as Record<Operator, number>;
+    for (const operator of operators) {
+      const parsed = Number(referenceBalances[operator].replace(',', '.'));
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        Alert.alert('Point de référence invalide', `Vérifie le solde de ${operator}.`);
+        return;
+      }
+      parsedReferences[operator] = Math.round(parsed * 100);
+    }
+    const parsedCash = Number(referenceCash.replace(',', '.'));
+    if (!Number.isFinite(parsedCash) || parsedCash < 0 || referenceSource.trim().length < 4) {
+      Alert.alert('Point de référence invalide', 'Vérifie la caisse initiale et précise sa source.');
+      return;
+    }
+    updateReferenceBalances(parsedReferences, Math.round(parsedCash * 100), referenceSource);
+    Alert.alert('Références mises à jour', 'Les soldes de départ sont datés et leur nouvelle source est inscrite dans le journal local.');
+  }
+
+  function confirmReset() {
+    Alert.alert(
+      'Réinitialiser les données locales ?',
+      'Cette action remplacera les opérations, agents, alertes et préférences enregistrés sur cet appareil par les exemples de démonstration. Elle est irréversible depuis l’application.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Réinitialiser', style: 'destructive', onPress: () => resetDemo() },
+      ],
+    );
+  }
+
+  return (
+    <Screen title="Paramètres" subtitle="Préférences locales de la boutique" back>
+      <Card style={{ backgroundColor: colors.infoSurface, borderColor: colors.infoSurface }}>
+        <Row style={{ alignItems: 'flex-start' }}>
+          <Feather name="smartphone" size={17} color={colors.secondaryForeground} />
+          <Text style={{ flex: 1, color: colors.secondaryForeground, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_500Medium' }}>
+            Les paramètres ne sont pas partagés avec d’autres appareils. Aucun compte ni synchronisation n’est configuré.
+          </Text>
+        </Row>
+      </Card>
+      <SectionTitle title="Boutique & calculs" />
+      <Card>
+        <Field label="Nom de la boutique" value={shopName} onChangeText={setShopName} />
+        <Field label="Devise (code à 3 lettres)" value={currency} onChangeText={setCurrency} autoCapitalize="characters" maxLength={3} />
+        <Field label={`Seuil d’écart (${currency || data.settings.currency})`} value={threshold} onChangeText={setThreshold} keyboardType="decimal-pad" />
+        <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>
+          Le seuil classe les écarts dans cette interface. Il ne masque jamais une différence et ne déclenche pas d’ajustement.
+        </Text>
+        <Field label="Nom de cet appareil" value={deviceName} onChangeText={setDeviceName} />
+        <Button title="Enregistrer les préférences" icon="save" onPress={savePreferences} />
+      </Card>
+      <SectionTitle title="Points de référence des soldes" />
+      <Card>
+        <Text style={{ color: colors.mutedForeground, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
+          Un point de départ est une donnée sourcée, datée et distincte du total théorique recalculé. Le remplacer ajoute une trace locale et recalcule les vues.
+        </Text>
+        {operators.map((operator) => (
+          <Field
+            key={operator}
+            label={`${operator} · devise ${currency || data.settings.currency}`}
+            value={referenceBalances[operator]}
+            onChangeText={(value) => setReferenceBalances((current) => ({ ...current, [operator]: value }))}
+            keyboardType="decimal-pad"
+          />
+        ))}
+        <Field label={`Référence de la caisse · devise ${currency || data.settings.currency}`} value={referenceCash} onChangeText={setReferenceCash} keyboardType="decimal-pad" />
+        <Field label="Source des points de référence" value={referenceSource} onChangeText={setReferenceSource} placeholder="Ex. relevé opérateur du 12/10/2026" />
+        {operators.map((operator) => (
+          <Text key={`${operator}-meta`} style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: 'Inter_400Regular' }}>
+            {operator} : {data.referenceMetadata[operator].source} · {new Date(data.referenceMetadata[operator].capturedAt).toLocaleString('fr-FR')}
+          </Text>
+        ))}
+        <Button title="Enregistrer les nouveaux points de départ" icon="save" variant="secondary" onPress={saveReferences} />
+      </Card>
+      <SectionTitle title="Limites actuelles" />
+      <Card>
+        <Limit text="Lecture automatique des SMS désactivée ; import de texte uniquement." />
+        <Limit text="Aucune synchronisation réseau ou sauvegarde distante." />
+        <Limit text="Les profils d’agents ne protègent pas l’accès aux données de l’appareil." />
+        <Limit text="Les preuves et statuts sont saisis localement et ne sont pas validés par un opérateur." />
+      </Card>
+      <SectionTitle title="Données de démonstration" />
+      <Card style={{ backgroundColor: colors.dangerSurface, borderColor: colors.dangerSurface }}>
+        <Text style={{ color: colors.destructive, fontSize: 14, fontFamily: 'Inter_700Bold' }}>Réinitialisation destructive</Text>
+        <Text style={{ color: colors.inkSoft, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
+          Remplace les données locales existantes par les exemples initiaux. Exporte d’abord les informations que tu veux conserver.
+        </Text>
+        <Button title="Réinitialiser les données de l’appareil" icon="rotate-ccw" variant="danger" onPress={confirmReset} />
+      </Card>
+    </Screen>
+  );
+}
+
+function Limit({ text }: { text: string }) {
+  const colors = useColors();
+  return (
+    <Row style={{ alignItems: 'flex-start' }}>
+      <Feather name="minus-circle" size={15} color={colors.mutedForeground} />
+      <Text style={{ flex: 1, color: colors.inkSoft, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>{text}</Text>
+    </Row>
+  );
+}
