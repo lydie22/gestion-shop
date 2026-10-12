@@ -27,7 +27,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sharing"
+      "expo-sharing",
+      "./plugins/withShopflowSms"
     ],
     "experiments": {
       "typedRoutes": true,

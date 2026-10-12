@@ -1,16 +1,19 @@
 import { Feather } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { Badge, Button, Card, ChoiceChip, Field, Row, Screen, SectionTitle, Spacer } from '@/components/shopflow/ui';
 import { formatDate, formatMoney } from '@/components/shopflow/format';
 import { CashMovement, getCashBalance, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
+import { shopflowApi } from '@/services/shopflowApi';
 
 type CashForm = 'open' | 'close' | 'movement' | null;
 type MovementCategory = CashMovement['category'];
 
 export default function CashScreen() {
   const { data, openCashSession, closeCashSession, addCashMovement, reviewCashMovement } = useShopFlow();
+  const { session } = useAuth();
   const colors = useColors();
   const [form, setForm] = useState<CashForm>(null);
   const [amount, setAmount] = useState('');
@@ -18,32 +21,86 @@ export default function CashScreen() {
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [category, setCategory] = useState<MovementCategory>('expense');
   const [pending, setPending] = useState(false);
+  const [serverBalance, setServerBalance] = useState<number | null>(null);
+  const [serverOpenSessionId, setServerOpenSessionId] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!session) {
+      setServerBalance(null);
+      setServerOpenSessionId(null);
+      return;
+    }
+    Promise.all([shopflowApi.getCashBalance(session.access_token), shopflowApi.getCashSessions(session.access_token)])
+      .then(([cash, sessions]) => {
+        setServerBalance(cash.theoretical_balance_cents);
+        setServerOpenSessionId(sessions.find((item) => item.status === 'open')?.id ?? null);
+        setServerError(null);
+      })
+      .catch((error: unknown) => setServerError(error instanceof Error ? error.message : 'Caisse serveur indisponible.'));
+  }, [session?.access_token]);
   const balance = getCashBalance(data);
   const currentSession = data.cashSessions.find((session) => session.status === 'open');
   const latestClosed = data.cashSessions.find((session) => session.status === 'closed');
 
   const cents = Math.round(Number(amount.replace(',', '.')) * 100);
-  function submit() {
+  const displayedBalance = serverBalance ?? balance;
+
+  async function submit() {
     if (!Number.isFinite(cents) || cents < 0 || (form === 'movement' && cents === 0)) {
       Alert.alert('Montant invalide', 'Saisis un montant positif pour un mouvement et un montant égal ou supérieur à zéro pour un comptage.');
       return;
     }
     if (form === 'open') {
-      if (cents !== balance && note.trim().length < 4) {
+      if (cents !== displayedBalance && note.trim().length < 4) {
         Alert.alert('Justification requise', 'Explique la différence entre le comptage d’ouverture et le solde théorique.');
         return;
       }
+      if (session) {
+        try {
+          const result = await shopflowApi.openCashSession({ counted_cents: cents, note: note.trim() }, session.access_token);
+          setServerOpenSessionId(result.id);
+          setServerBalance(result.theoretical_cents);
+        } catch (error: unknown) {
+          Alert.alert('Ouverture serveur refusée', error instanceof Error ? error.message : 'Impossible d’ouvrir la caisse côté serveur.');
+          return;
+        }
+      }
       openCashSession(cents, note);
     } else if (form === 'close') {
-      if (cents !== balance && note.trim().length < 4) {
+      if (cents !== displayedBalance && note.trim().length < 4) {
         Alert.alert('Justification requise', 'Explique l’écart. Le solde théorique ne sera pas modifié.');
         return;
+      }
+      if (session) {
+        if (!serverOpenSessionId) {
+          Alert.alert('Session serveur introuvable', 'Actualise la caisse avant de clôturer cette session.');
+          return;
+        }
+        try {
+          const result = await shopflowApi.closeCashSession(serverOpenSessionId, { counted_cents: cents, note: note.trim() }, session.access_token);
+          setServerOpenSessionId(null);
+          setServerBalance(result.theoretical_cents);
+        } catch (error: unknown) {
+          Alert.alert('Clôture serveur refusée', error instanceof Error ? error.message : 'Impossible de clôturer la caisse côté serveur.');
+          return;
+        }
       }
       closeCashSession(cents, note);
     } else if (form === 'movement') {
       if (note.trim().length < 3) {
         Alert.alert('Motif requis', 'Ajoute un motif pour conserver une trace du mouvement.');
         return;
+      }
+      if (session) {
+        try {
+          const result = await shopflowApi.createCashMovement({ category, amount_cents: cents, note: note.trim(), idempotency_key: `cash-${Date.now()}-${category}-${cents}` }, session.access_token);
+          setServerError(result.status === 'pending' ? 'Mouvement transmis en attente de revue serveur.' : null);
+          const updated = await shopflowApi.getCashBalance(session.access_token);
+          setServerBalance(updated.theoretical_balance_cents);
+        } catch (error: unknown) {
+          Alert.alert('Mouvement serveur refusé', error instanceof Error ? error.message : 'Impossible d’enregistrer le mouvement côté serveur.');
+          return;
+        }
       }
       const sign = category === 'owner_in' ? 1 : category === 'owner_out' || category === 'expense' ? -1 : 0;
       addCashMovement({
@@ -64,11 +121,12 @@ export default function CashScreen() {
     <Screen title="Caisse" subtitle="Espèces physiques · mouvements et clôtures">
       <Card style={{ backgroundColor: colors.hero, borderColor: colors.hero }}>
         <Text style={{ color: colors.heroMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>SOLDE THÉORIQUE</Text>
-        <Text style={{ color: colors.heroBalance, fontSize: 34, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] }}>{formatMoney(balance, data.settings.currency)}</Text>
+        <Text style={{ color: colors.heroBalance, fontSize: 34, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] }}>{formatMoney(displayedBalance, data.settings.currency)}</Text>
         <Text style={{ color: colors.heroMuted, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
           Référence : {formatMoney(data.referenceCashCents, data.settings.currency)} · les mouvements en attente sont exclus.
         </Text>
       </Card>
+      {session ? <Text style={{ color: serverError ? colors.warning : colors.mutedForeground, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>{serverError ?? 'Caisse connectée : les mutations sont contrôlées par le serveur puis conservées localement pour le mode hors ligne.'}</Text> : null}
 
       <Card>
         <Row>
@@ -93,9 +151,9 @@ export default function CashScreen() {
         </Row>
         <Row>
           {!currentSession ? (
-            <View style={{ flex: 1 }}><Button title="Ouvrir une session" icon="play" onPress={() => { setForm(form === 'open' ? null : 'open'); setAmount((balance / 100).toFixed(2)); }} /></View>
+            <View style={{ flex: 1 }}><Button title="Ouvrir une session" icon="play" onPress={() => { setForm(form === 'open' ? null : 'open'); setAmount((displayedBalance / 100).toFixed(2)); }} /></View>
           ) : (
-            <View style={{ flex: 1 }}><Button title="Clôturer la session" icon="check-square" onPress={() => { setForm(form === 'close' ? null : 'close'); setAmount((balance / 100).toFixed(2)); }} /></View>
+            <View style={{ flex: 1 }}><Button title="Clôturer la session" icon="check-square" onPress={() => { setForm(form === 'close' ? null : 'close'); setAmount((displayedBalance / 100).toFixed(2)); }} /></View>
           )}
           <View style={{ flex: 1 }}><Button title="Mouvement" variant="secondary" icon="plus" onPress={() => setForm(form === 'movement' ? null : 'movement')} /></View>
         </Row>

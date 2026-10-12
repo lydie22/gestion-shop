@@ -1,13 +1,17 @@
 import { Feather } from '@expo/vector-icons';
-import React, { useState } from 'react';
-import { Alert, Text } from 'react-native';
-import { Button, Card, Field, Row, Screen, SectionTitle } from '@/components/shopflow/ui';
+import React, { useEffect, useState } from 'react';
+import { Alert, Text, View } from 'react-native';
+import { Button, Card, ChoiceChip, Field, Row, Screen, SectionTitle } from '@/components/shopflow/ui';
 import { Operator, operators, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
+import { shopflowApi, SubscriptionSummary } from '@/services/shopflowApi';
+import { getLocalDeviceKey } from '@/services/deviceIdentity';
 
 export default function SettingsScreen() {
   const { data, updateSettings, updateReferenceBalances, resetDemo } = useShopFlow();
   const colors = useColors();
+  const { session } = useAuth();
   const [shopName, setShopName] = useState(data.settings.shopName);
   const [currency, setCurrency] = useState(data.settings.currency);
   const [threshold, setThreshold] = useState((data.settings.discrepancyThresholdCents / 100).toFixed(2));
@@ -19,6 +23,44 @@ export default function SettingsScreen() {
   });
   const [referenceCash, setReferenceCash] = useState((data.referenceCashCents / 100).toFixed(2));
   const [referenceSource, setReferenceSource] = useState('Comptage / relevé de référence saisi manuellement');
+  const [deviceKey, setDeviceKey] = useState('');
+  const [deviceStatus, setDeviceStatus] = useState<string | null>(null);
+  const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
+  const [subscriptionPlan, setSubscriptionPlan] = useState<SubscriptionSummary['plan']>('pilot');
+
+  useEffect(() => {
+    getLocalDeviceKey().then(setDeviceKey).catch(() => setDeviceStatus('Identifiant local indisponible'));
+  }, []);
+
+  useEffect(() => {
+    if (!session) {
+      setSubscription(null);
+      return;
+    }
+    shopflowApi.getSubscription(session.access_token)
+      .then((value) => { setSubscription(value); setSubscriptionPlan(value.plan); })
+      .catch(() => setSubscription(null));
+  }, [session?.access_token]);
+
+  async function saveSubscription() {
+    if (!session || session.role !== 'owner' || !subscription) return;
+    try {
+      setSubscription(await shopflowApi.updateSubscription({ plan: subscriptionPlan, status: subscription.status }, session.access_token));
+      Alert.alert('Abonnement mis à jour', 'Le plan SaaS de cette boutique a été enregistré côté serveur.');
+    } catch (cause) {
+      Alert.alert('Mise à jour impossible', cause instanceof Error ? cause.message : 'Le serveur a refusé la modification.');
+    }
+  }
+
+  async function registerDevice() {
+    if (!session || !deviceKey || !['owner', 'supervisor'].includes(session.role)) return;
+    try {
+      const result = await shopflowApi.registerDevice({ device_key: deviceKey, label: deviceName.trim() || 'Appareil ShopFlow' }, session.access_token);
+      setDeviceStatus(result.status === 'active' ? 'Appareil autorisé pour cette boutique.' : result.status);
+    } catch (cause) {
+      setDeviceStatus(cause instanceof Error ? cause.message : 'Association impossible.');
+    }
+  }
 
   function savePreferences() {
     const cents = Math.round(Number(threshold.replace(',', '.')) * 100);
@@ -66,15 +108,36 @@ export default function SettingsScreen() {
   }
 
   return (
-    <Screen title="Paramètres" subtitle="Préférences locales de la boutique" back>
+      <Screen title="Paramètres" subtitle={session ? `Boutique connectée · rôle ${session.role}` : 'Préférences locales de la boutique'} back>
       <Card style={{ backgroundColor: colors.infoSurface, borderColor: colors.infoSurface }}>
         <Row style={{ alignItems: 'flex-start' }}>
           <Feather name="smartphone" size={17} color={colors.secondaryForeground} />
           <Text style={{ flex: 1, color: colors.secondaryForeground, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_500Medium' }}>
-            Les paramètres ne sont pas partagés avec d’autres appareils. Aucun compte ni synchronisation n’est configuré.
+            {session ? 'Les préférences de calcul restent locales à cet appareil ; les opérations, rôles et écritures validées sont contrôlés par le backend.' : 'Les paramètres ne sont pas partagés avec d’autres appareils. Connecte-toi pour activer les contrôles serveur.'}
           </Text>
         </Row>
       </Card>
+      {session && subscription ? (
+        <>
+          <SectionTitle title="Abonnement SaaS" />
+          <Card>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: 'Inter_700Bold' }}>Plan {subscription.plan}</Text>
+              <Text style={{ color: subscription.status === 'active' || subscription.status === 'trialing' ? colors.success : colors.warning, fontSize: 12, fontFamily: 'Inter_700Bold' }}>{subscription.status}</Text>
+            </Row>
+            {subscription.trial_ends_at ? <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>Essai jusqu’au {new Date(subscription.trial_ends_at).toLocaleDateString('fr-FR')}</Text> : null}
+            {session.role === 'owner' ? (
+              <>
+                <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_500Medium' }}>Plan de la boutique</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {(['pilot', 'standard', 'pro'] as const).map((item) => <ChoiceChip key={item} label={item} selected={subscriptionPlan === item} onPress={() => setSubscriptionPlan(item)} />)}
+                </View>
+                <Button title="Enregistrer le plan SaaS" icon="save" variant="secondary" onPress={() => void saveSubscription()} />
+              </>
+            ) : null}
+          </Card>
+        </>
+      ) : null}
       <SectionTitle title="Boutique & calculs" />
       <Card>
         <Field label="Nom de la boutique" value={shopName} onChangeText={setShopName} />
@@ -85,6 +148,15 @@ export default function SettingsScreen() {
         </Text>
         <Field label="Nom de cet appareil" value={deviceName} onChangeText={setDeviceName} />
         <Button title="Enregistrer les préférences" icon="save" onPress={savePreferences} />
+        {session && ['owner', 'supervisor'].includes(session.role) ? (
+          <>
+            <Button title="Associer cet appareil à la boutique" icon="link" variant="outline" onPress={() => void registerDevice()} />
+            <Text style={{ color: colors.mutedForeground, fontSize: 10, lineHeight: 15, fontFamily: 'Inter_400Regular' }}>
+              Identifiant technique : {deviceKey || 'génération en cours'}
+            </Text>
+            {deviceStatus ? <Text style={{ color: deviceStatus.includes('autorisé') ? colors.success : colors.warning, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_500Medium' }}>{deviceStatus}</Text> : null}
+          </>
+        ) : null}
       </Card>
       <SectionTitle title="Points de référence des soldes" />
       <Card>
@@ -112,8 +184,8 @@ export default function SettingsScreen() {
       <SectionTitle title="Limites actuelles" />
       <Card>
         <Limit text="Lecture automatique des SMS désactivée ; import de texte uniquement." />
-        <Limit text="Aucune synchronisation réseau ou sauvegarde distante." />
-        <Limit text="Les profils d’agents ne protègent pas l’accès aux données de l’appareil." />
+        <Limit text={session ? 'Les opérations synchronisées sont protégées par le rôle et la boutique côté serveur.' : 'Aucune synchronisation réseau ou sauvegarde distante.'} />
+        <Limit text={session ? 'Les profils locaux restent indicatifs ; les permissions financières réelles sont serveur.' : 'Les profils d’agents ne protègent pas l’accès aux données de l’appareil.'} />
         <Limit text="Les preuves et statuts sont saisis localement et ne sont pas validés par un opérateur." />
       </Card>
       <SectionTitle title="Données de démonstration" />

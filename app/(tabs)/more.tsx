@@ -5,6 +5,7 @@ import { Pressable, Text, View } from 'react-native';
 import { Card, Row, Screen, Spacer } from '@/components/shopflow/ui';
 import { useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
 
 const menu = [
   { title: 'Rapports & commissions', detail: 'Synthèse journalière, par opérateur et par agent', icon: 'bar-chart-2' as const, route: '/reports' },
@@ -19,15 +20,16 @@ const menu = [
 export default function MoreScreen() {
   const colors = useColors();
   const { data } = useShopFlow();
+  const { session, logout } = useAuth();
   return (
     <Screen title="Plus" subtitle={data.settings.shopName}>
       <Card style={{ backgroundColor: colors.hero, borderColor: colors.hero }}>
         <Row style={{ alignItems: 'flex-start' }}>
           <Feather name="smartphone" size={20} color={colors.primaryForeground} />
           <View style={{ flex: 1, gap: 6 }}>
-            <Text style={{ color: colors.primaryForeground, fontSize: 15, fontFamily: 'Inter_700Bold' }}>Mode local sur un appareil</Text>
+            <Text style={{ color: colors.primaryForeground, fontSize: 15, fontFamily: 'Inter_700Bold' }}>{session ? `Connecté · rôle ${session.role}` : 'Mode local sur un appareil'}</Text>
             <Text style={{ color: colors.heroMuted, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
-              Les données restent dans le stockage de l’application. Les rôles présentés ne remplacent ni une connexion ni des autorisations sécurisées.
+              {session ? 'Les opérations sensibles sont autorisées par le backend et chaque boutique possède son propre périmètre de données.' : 'Les données restent dans le stockage de l’application. Les rôles présentés ne remplacent ni une connexion ni des autorisations sécurisées.'}
             </Text>
           </View>
         </Row>
@@ -48,6 +50,12 @@ export default function MoreScreen() {
           </Card>
         </Pressable>
       ))}
+      <Card onPress={() => void logout()}>
+        <Row>
+          <Feather name="log-out" size={19} color={colors.destructive} />
+          <Text style={{ color: colors.destructive, fontSize: 14, fontFamily: 'Inter_600SemiBold' }}>Se déconnecter</Text>
+        </Row>
+      </Card>
       <Spacer size={5} />
       <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 17, textAlign: 'center', fontFamily: 'Inter_400Regular' }}>
         Version de démonstration locale · aucune donnée financière réelle n’est connectée.

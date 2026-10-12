@@ -11,9 +11,10 @@ import {
   Inter_700Bold,
   useFonts,
 } from '@expo-google-fonts/inter';
-import { Stack } from 'expo-router';
+import { Stack, Redirect, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { ShopFlowProvider } from '@/context/ShopFlowContext';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -21,8 +22,15 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
+  const { session, isHydrating } = useAuth();
+  const segments = useSegments();
+  if (isHydrating) return null;
+  const onAuthRoute = segments[0] === 'auth';
+  if (!session && !onAuthRoute) return <Redirect href="/auth" />;
+  if (session && onAuthRoute) return <Redirect href="/(tabs)" />;
   return (
     <Stack screenOptions={{ headerShown: false, headerBackTitle: 'Retour' }}>
+      <Stack.Screen name="auth" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
     </Stack>
   );
@@ -50,9 +58,11 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView>
             <KeyboardProvider>
-              <ShopFlowProvider>
-                <RootLayoutNav />
-              </ShopFlowProvider>
+              <AuthProvider>
+                <ShopFlowProvider>
+                  <RootLayoutNav />
+                </ShopFlowProvider>
+              </AuthProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>
         </QueryClientProvider>

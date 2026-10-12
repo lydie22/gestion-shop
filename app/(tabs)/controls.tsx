@@ -1,11 +1,13 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { Badge, Card, ChoiceChip, Field, Row, Screen, SectionTitle } from '@/components/shopflow/ui';
+import { Badge, Button, Card, ChoiceChip, Field, Row, Screen, SectionTitle } from '@/components/shopflow/ui';
 import { anomalySeverityName, anomalyTone, formatDate, formatMoney } from '@/components/shopflow/format';
 import { useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
+import { BackendAnomaly, shopflowApi } from '@/services/shopflowApi';
 
 const filterChoices = [
   { label: 'Tous', value: 'all' },
@@ -17,11 +19,39 @@ const severityChoices = ['all', 'critical', 'high', 'moderate', 'low'] as const;
 
 export default function ControlsScreen() {
   const { data } = useShopFlow();
+  const { session } = useAuth();
   const colors = useColors();
   const [filter, setFilter] = useState<(typeof filterChoices)[number]['value']>('all');
   const [severity, setSeverity] = useState<(typeof severityChoices)[number]>('all');
   const [query, setQuery] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const [serverAnomalies, setServerAnomalies] = useState<BackendAnomaly[]>([]);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [serverNotes, setServerNotes] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!session) {
+      setServerAnomalies([]);
+      setServerError(null);
+      return;
+    }
+    shopflowApi.listAnomalies(session.access_token)
+      .then(setServerAnomalies)
+      .catch((error: unknown) => setServerError(error instanceof Error ? error.message : 'Anomalies serveur indisponibles.'));
+  }, [session?.access_token]);
+
+  async function resolveServerAnomaly(anomaly: BackendAnomaly) {
+    if (!session || !['owner', 'supervisor'].includes(session.role)) return;
+    const resolution = serverNotes[anomaly.id]?.trim() ?? '';
+    if (resolution.length < 4) return;
+    try {
+      const updated = await shopflowApi.resolveAnomaly(anomaly.id, resolution, session.access_token);
+      setServerAnomalies((items) => items.map((item) => item.id === updated.id ? updated : item));
+      setServerNotes((items) => ({ ...items, [anomaly.id]: '' }));
+    } catch (error: unknown) {
+      setServerError(error instanceof Error ? error.message : 'Résolution serveur impossible.');
+    }
+  }
   const visible = useMemo(
     () => data.anomalies.filter((anomaly) => {
       const matchesStatus = filter === 'all' || anomaly.status === filter;
@@ -47,6 +77,32 @@ export default function ControlsScreen() {
           </View>
         </Row>
       </Card>
+
+      {session ? (
+        <Card>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: 'Inter_700Bold' }}>Dossiers serveur · boutique connectée</Text>
+            <Badge tone={serverAnomalies.some((item) => item.status !== 'resolved') ? 'warning' : 'success'}>{serverAnomalies.filter((item) => item.status !== 'resolved').length} ouverts</Badge>
+          </Row>
+          {serverError ? <Text style={{ color: colors.warning, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>{serverError}</Text> : null}
+          {serverAnomalies.slice(0, 8).map((anomaly) => (
+            <View key={anomaly.id} style={{ gap: 6, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={{ flex: 1, color: colors.foreground, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>{anomaly.title}</Text>
+                <Badge tone={anomaly.status === 'resolved' ? 'success' : anomaly.severity === 'high' ? 'danger' : 'warning'}>{anomaly.status === 'resolved' ? 'Résolu' : anomaly.severity}</Badge>
+              </Row>
+              <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>{anomaly.description}</Text>
+              {anomaly.status !== 'resolved' && ['owner', 'supervisor'].includes(session.role) ? (
+                <>
+                  <Field label="Justification de résolution" placeholder="Fait vérifié ou décision prise…" value={serverNotes[anomaly.id] ?? ''} onChangeText={(value) => setServerNotes((items) => ({ ...items, [anomaly.id]: value }))} />
+                  <Button title="Résoudre côté serveur" icon="check" variant="secondary" onPress={() => void resolveServerAnomaly(anomaly)} disabled={(serverNotes[anomaly.id] ?? '').trim().length < 4} />
+                </>
+              ) : null}
+            </View>
+          ))}
+          {serverAnomalies.length === 0 && !serverError ? <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>Aucun dossier serveur reçu.</Text> : null}
+        </Card>
+      ) : null}
 
       <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1, borderRadius: 18, overflow: 'hidden' }}>
         <Pressable

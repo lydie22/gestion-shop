@@ -1,5 +1,5 @@
 import { Feather } from '@expo/vector-icons';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Platform, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -8,6 +8,8 @@ import { Badge, Button, Card, Field, Row, Screen, SectionTitle } from '@/compone
 import { csvCell, formatDate, formatMoney, transactionTypeName } from '@/components/shopflow/format';
 import { CashMovement, getCashBalance, getWalletBalance, operators, Transaction, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
+import { CommissionSummary, shopflowApi } from '@/services/shopflowApi';
 
 const localDayKey = (date: string) => {
   const parsed = new Date(date);
@@ -46,8 +48,33 @@ function openingBalanceForDay(baseCents: number, anchorAt: string, day: string, 
 
 export default function ReportsScreen() {
   const { data } = useShopFlow();
+  const { session } = useAuth();
   const colors = useColors();
   const [day, setDay] = useState(todayKey());
+  const [serverCommissions, setServerCommissions] = useState<CommissionSummary | null>(null);
+  const [serverCommissionError, setServerCommissionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    if (!session) {
+      setServerCommissions(null);
+      setServerCommissionError(null);
+      return () => { active = false; };
+    }
+    setServerCommissionError(null);
+    shopflowApi.getCommissions(session.access_token)
+      .then((summary) => {
+        if (active) setServerCommissions(summary);
+      })
+      .catch((error: unknown) => {
+        if (active) setServerCommissionError(error instanceof Error ? error.message : 'Impossible de charger le suivi serveur.');
+      });
+    return () => { active = false; };
+  }, [session?.access_token]);
+
+  const serverExpectedCents = serverCommissions?.calculations.reduce((sum, item) => sum + item.expected_cents, 0) ?? 0;
+  const serverReceivedCents = serverCommissions?.receipts.reduce((sum, item) => sum + item.amount_cents, 0) ?? 0;
+  const serverGapCents = serverExpectedCents - serverReceivedCents;
   const today = todayKey();
   const parsedDay = new Date(`${day}T00:00:00`);
   const validDay = /^\d{4}-\d{2}-\d{2}$/.test(day) &&
@@ -475,6 +502,37 @@ export default function ReportsScreen() {
           <Text style={{ color: colors.primary, fontSize: 15, fontFamily: 'Inter_700Bold' }}>{formatMoney(commissionsConfirmed, data.settings.currency)}</Text>
         </Row>
       </Card>
+      {session ? (
+        <Card>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <View style={{ gap: 4 }}>
+              <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Suivi serveur · toutes dates</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>Calculs attendus et encaissements enregistrés dans la boutique</Text>
+            </View>
+            <Badge tone={serverCommissionError ? 'warning' : serverGapCents === 0 ? 'success' : 'warning'}>
+              {serverCommissionError ? 'Indisponible' : serverGapCents === 0 ? 'Équilibré' : 'Écart'}
+            </Badge>
+          </Row>
+          {serverCommissionError ? (
+            <Text style={{ color: colors.warning, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>{serverCommissionError}</Text>
+          ) : (
+            <>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: 'Inter_400Regular' }}>Commissions attendues</Text>
+                <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: 'Inter_700Bold' }}>{formatMoney(serverExpectedCents, data.settings.currency)}</Text>
+              </Row>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: 'Inter_400Regular' }}>Reçues et rapprochées</Text>
+                <Text style={{ color: colors.primary, fontSize: 14, fontFamily: 'Inter_700Bold' }}>{formatMoney(serverReceivedCents, data.settings.currency)}</Text>
+              </Row>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: 'Inter_400Regular' }}>Écart à documenter</Text>
+                <Text style={{ color: serverGapCents === 0 ? colors.success : colors.warning, fontSize: 14, fontFamily: 'Inter_700Bold' }}>{formatMoney(serverGapCents, data.settings.currency)}</Text>
+              </Row>
+            </>
+          )}
+        </Card>
+      ) : null}
       <SectionTitle title="Qualité des données" />
       <Card>
         <Row style={{ justifyContent: 'space-between' }}><Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_500Medium' }}>Opérations en attente</Text><Badge tone={pending.length ? 'warning' : 'success'}>{pending.length}</Badge></Row>

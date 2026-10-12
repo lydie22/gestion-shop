@@ -6,10 +6,12 @@ import { Badge, Body, Button, Card, Row, Screen, SectionTitle, Spacer } from '@/
 import { formatDate, formatMoney, transactionStatusTone, transactionTypeName } from '@/components/shopflow/format';
 import { getCashBalance, getWalletBalance, operators, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
 
 export default function DashboardScreen() {
   const { data, isReady, storageIssue } = useShopFlow();
   const colors = useColors();
+  const { session } = useAuth();
   const totalOpen = data.anomalies.filter((anomaly) => anomaly.status !== 'resolved').length;
   const pending = data.transactions.filter((transaction) => transaction.status === 'pending').length;
   const confirmedToday = data.transactions.filter(
@@ -50,7 +52,7 @@ export default function DashboardScreen() {
           {formatMoney(operators.reduce((sum, operator) => sum + getWalletBalance(data, operator), 0), data.settings.currency)}
         </Text>
         <Text style={{ color: colors.heroMuted, fontSize: 12, fontFamily: 'Inter_400Regular' }}>
-          Calculé à partir des opérations locales confirmées · jamais un solde opérateur en temps réel
+          {session ? 'Calcul local hors ligne · les écritures serveur restent consultables dans le journal' : 'Calculé à partir des opérations locales confirmées · jamais un solde opérateur en temps réel'}
         </Text>
         <Row style={{ justifyContent: 'space-between', marginTop: 3 }}>
           <Text style={{ color: colors.primaryForeground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Référence la plus récente</Text>
@@ -165,9 +167,9 @@ export default function DashboardScreen() {
         <Row>
           <Feather name="smartphone" size={18} color={colors.primary} />
           <View style={{ flex: 1, gap: 4 }}>
-            <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Données locales uniquement</Text>
+            <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>{session ? 'Mode connecté + hors ligne' : 'Données locales uniquement'}</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
-              Pas de serveur, de synchronisation ni de lecture automatique des SMS. Les exemples sont fictifs.
+              {session ? 'Les SMS importés restent contrôlés et synchronisables ; aucune lecture automatique non autorisée.' : 'Pas de serveur, de synchronisation ni de lecture automatique des SMS. Les exemples sont fictifs.'}
             </Text>
           </View>
         </Row>

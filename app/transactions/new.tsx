@@ -1,11 +1,14 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { Badge, Button, Card, ChoiceChip, Field, Row, Screen } from '@/components/shopflow/ui';
 import { formatMoney } from '@/components/shopflow/format';
 import { Operator, operators, TransactionStatus, TransactionType, transactionTypeLabel, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
+import { BackendAccount, shopflowApi } from '@/services/shopflowApi';
+import { enqueueTransaction, readPendingTransactions, removePendingTransaction } from '@/services/syncQueue';
 
 const types: TransactionType[] = ['deposit', 'withdrawal', 'transfer_in', 'transfer_out', 'fee'];
 
@@ -17,6 +20,9 @@ function readCents(value: string) {
 export default function NewTransactionScreen() {
   const { addTransaction, data } = useShopFlow();
   const colors = useColors();
+  const { session } = useAuth();
+  const [backendAccounts, setBackendAccounts] = useState<BackendAccount[]>([]);
+  const [backendError, setBackendError] = useState<string | null>(null);
   const [operator, setOperator] = useState<Operator>(operators[0]);
   const [type, setType] = useState<TransactionType>('deposit');
   const [amount, setAmount] = useState('');
@@ -27,7 +33,30 @@ export default function NewTransactionScreen() {
   const [note, setNote] = useState('');
   const [status, setStatus] = useState<TransactionStatus>('pending');
 
-  function save() {
+  useEffect(() => {
+    if (!session) return;
+    shopflowApi.listAccounts(session.access_token).then(setBackendAccounts).catch((cause) => setBackendError(cause instanceof Error ? cause.message : 'Comptes backend indisponibles.'));
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    readPendingTransactions().then(async (pending) => {
+      let remaining = 0;
+      for (const item of pending) {
+        try {
+          await shopflowApi.createTransaction(item, session.access_token);
+          await removePendingTransaction(item.idempotency_key);
+        } catch {
+          remaining += 1;
+        }
+      }
+      if (!cancelled && remaining > 0) setBackendError(`${remaining} opération(s) locale(s) restent en attente de synchronisation.`);
+    });
+    return () => { cancelled = true; };
+  }, [session]);
+
+  async function save() {
     const amountCents = readCents(amount);
     const feeCents = fee ? readCents(fee) : 0;
     const commissionCents = commission ? readCents(commission) : 0;
@@ -49,6 +78,34 @@ export default function NewTransactionScreen() {
       Alert.alert('Référence déjà enregistrée', 'Une opération avec cette référence existe déjà pour cet opérateur. Vérifie la saisie avant de continuer.');
       return;
     }
+    const backendAccount = backendAccounts.find((item) => item.operator === operator && item.active);
+    if (session && !backendAccount) {
+      Alert.alert('Compte backend requis', `Aucun compte ${operator} actif n’est affecté à cette boutique. Configure d’abord le compte côté serveur.`);
+      return;
+    }
+    let serverMessage = '';
+    const serverPayload = session && backendAccount ? {
+      account_id: backendAccount.id,
+      reference: reference.trim() || `LOCAL-${Date.now()}`,
+      operation_type: type,
+      amount_cents: amountCents,
+      fee_cents: Number.isFinite(feeCents) ? feeCents : 0,
+      commission_expected_cents: Number.isFinite(commissionCents) ? commissionCents : 0,
+      status: status === 'failed' ? 'failed' : status,
+      source: 'manual' as const,
+      note,
+      idempotency_key: `mobile-${Date.now()}-${reference.trim() || amountCents}`,
+    } : null;
+    if (session && backendAccount && serverPayload) {
+      try {
+        const serverTransaction = await shopflowApi.createTransaction(serverPayload, session.access_token);
+        serverMessage = ` Serveur : ${serverTransaction.reconciliation_status}.`;
+      } catch (cause) {
+        if (serverPayload) await enqueueTransaction(serverPayload);
+        setBackendError(cause instanceof Error ? cause.message : 'Synchronisation serveur impossible.');
+        serverMessage = ' Serveur indisponible : conservée localement pour synchronisation ultérieure.';
+      }
+    }
     addTransaction({
       operator,
       type,
@@ -63,7 +120,7 @@ export default function NewTransactionScreen() {
     Alert.alert(
       'Opération enregistrée',
       status === 'confirmed'
-        ? 'Cette opération est marquée comme confirmée par saisie locale. ShopFlow ne l’a pas vérifiée auprès de l’opérateur.'
+        ? `Cette opération est enregistrée avec une preuve déclarée ; elle n’est pas une confirmation opérateur.${serverMessage}`
         : status === 'failed'
           ? 'L’opération déclarée en échec reste dans l’historique mais ne modifie pas les soldes.'
           : 'L’opération reste en attente et n’entre pas dans le calcul des soldes.',
@@ -72,7 +129,7 @@ export default function NewTransactionScreen() {
   }
 
   return (
-    <Screen title="Nouvelle opération" subtitle="Saisie locale · aucune requête serveur" back>
+    <Screen title="Nouvelle opération" subtitle={session ? 'Saisie contrôlée · envoi backend + conservation hors ligne' : 'Saisie locale · aucune requête serveur'} back>
       <Card style={{ backgroundColor: colors.infoSurface, borderColor: colors.infoSurface }}>
         <Row style={{ alignItems: 'flex-start' }}>
           <Feather name="info" size={17} color={colors.secondaryForeground} />
@@ -81,6 +138,7 @@ export default function NewTransactionScreen() {
           </Text>
         </Row>
       </Card>
+      {session && backendError ? <Text style={{ color: colors.warning, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>{backendError} Les opérations déjà locales restent conservées.</Text> : null}
 
       <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Opérateur</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -136,7 +194,7 @@ export default function NewTransactionScreen() {
           Impacts prévus : portefeuille {type === 'deposit' || type === 'transfer_in' ? '+' : type === 'withdrawal' || type === 'transfer_out' || type === 'fee' ? '−' : '0'}{formatMoney(readCents(amount) || 0, data.settings.currency)} · caisse {type === 'deposit' ? '+' : type === 'withdrawal' ? '−' : 'sans changement'}{type === 'deposit' || type === 'withdrawal' ? formatMoney(readCents(amount) || 0, data.settings.currency) : ''}
         </Text>
       </Card>
-      <Button title="Enregistrer dans le journal local" icon="check" onPress={save} testID="save-transaction" />
+      <Button title={session ? 'Enregistrer et synchroniser' : 'Enregistrer dans le journal local'} icon="check" onPress={() => void save()} testID="save-transaction" />
     </Screen>
   );
 }

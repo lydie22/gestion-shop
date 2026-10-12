@@ -1,11 +1,13 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { formatDate, formatMoney, statusName, transactionTypeName } from '@/components/shopflow/format';
 import { Badge, Card, ChoiceChip, Row, Screen, SectionTitle } from '@/components/shopflow/ui';
 import { getCashBalance, getWalletBalance, operators, Operator, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
+import { shopflowApi } from '@/services/shopflowApi';
 
 type LedgerAccount = Operator | 'Caisse';
 type LedgerRow = {
@@ -23,6 +25,21 @@ type LedgerRow = {
 export default function LedgerScreen() {
   const { data } = useShopFlow();
   const colors = useColors();
+  const { session } = useAuth();
+  const [serverLedger, setServerLedger] = useState<Array<{ id: string; reference: string; balanced: boolean; debit_cents: number; credit_cents: number }>>([]);
+  const [serverCash, setServerCash] = useState<number | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!session) return;
+    Promise.all([shopflowApi.getLedger(session.access_token), shopflowApi.getCashBalance(session.access_token)])
+      .then(([ledger, cashBalance]) => {
+        setServerLedger(ledger);
+        setServerCash(cashBalance.theoretical_balance_cents);
+        setServerError(null);
+      })
+      .catch((cause) => setServerError(cause instanceof Error ? cause.message : 'Journal serveur indisponible.'));
+  }, [session]);
   const [account, setAccount] = useState<LedgerAccount>(operators[0]);
   const cash = account === 'Caisse';
   const anchorAt = cash ? data.referenceCashMetadata.capturedAt : data.referenceMetadata[account].capturedAt;
@@ -99,6 +116,21 @@ export default function LedgerScreen() {
           </Text>
         </Row>
       </Card>
+      {session ? (
+        <Card style={{ backgroundColor: colors.card, borderColor: colors.primary }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_700Bold' }}>Journal serveur connecté</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>
+                {serverLedger.length} écriture{serverLedger.length === 1 ? '' : 's'} · toutes équilibrées : {serverLedger.every((entry) => entry.balanced) ? 'oui' : 'à vérifier'}
+              </Text>
+            </View>
+            <Badge tone={serverError ? 'warning' : 'success'}>{serverError ? 'Hors ligne' : 'Synchronisé'}</Badge>
+          </Row>
+          {serverCash !== null ? <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>Caisse backend : {formatMoney(serverCash, data.settings.currency)}</Text> : null}
+          {serverError ? <Text style={{ color: colors.warning, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>{serverError} Les données locales restent visibles.</Text> : null}
+        </Card>
+      ) : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {operators.map((operator) => (
           <ChoiceChip key={operator} label={operator} selected={account === operator} onPress={() => setAccount(operator)} />
