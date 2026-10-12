@@ -12,7 +12,7 @@
  * The useColors() hook will automatically pick it up.
  */
 
-const brandRed = '#D92D20';
+const brandRed = '#807676';
 
 const colors = {
   light: {
