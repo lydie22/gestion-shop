@@ -6,7 +6,7 @@ import { formatDate, formatMoney } from '@/components/shopflow/format';
 import { Operator, operators, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
-import { shopflowApi } from '@/services/shopflowApi';
+import { BackendSmsMessage, shopflowApi } from '@/services/shopflowApi';
 import { flushPendingSmsEvents, readPendingSmsEvents } from '@/services/smsSyncQueue';
 import { clearNativeSmsQueue, configureNativeSms, drainNativeSms, isNativeSmsAvailable } from '../modules/shopflow-sms/src';
 
@@ -17,6 +17,7 @@ export default function SmsScreen() {
   const [text, setText] = useState('');
   const [operator, setOperator] = useState<Operator>(operators[0]);
   const [serverReconciliations, setServerReconciliations] = useState<Array<{ status: string; reason: string }>>([]);
+  const [serverSmsMessages, setServerSmsMessages] = useState<BackendSmsMessage[]>([]);
 
   useEffect(() => {
     if (!isReady || Platform.OS !== 'android' || !isNativeSmsAvailable) return;
@@ -29,11 +30,18 @@ export default function SmsScreen() {
   useEffect(() => {
     if (!session) {
       setServerReconciliations([]);
+      setServerSmsMessages([]);
       return;
     }
-    shopflowApi.getReconciliations(session.access_token)
-      .then(setServerReconciliations)
-      .catch(() => setServerReconciliations([]));
+    Promise.all([shopflowApi.getReconciliations(session.access_token), shopflowApi.listSmsMessages(session.access_token)])
+      .then(([reconciliations, messages]) => {
+        setServerReconciliations(reconciliations);
+        setServerSmsMessages(messages);
+      })
+      .catch(() => {
+        setServerReconciliations([]);
+        setServerSmsMessages([]);
+      });
   }, [session?.access_token]);
 
   const serverStatusCounts = useMemo(() => serverReconciliations.reduce<Record<string, number>>((counts, item) => {
@@ -118,6 +126,31 @@ export default function SmsScreen() {
             Concordants : {serverStatusCounts.matched ?? 0} · à vérifier : {(serverStatusCounts.unmatched ?? 0) + (serverStatusCounts.amount_mismatch ?? 0) + (serverStatusCounts.status_conflict ?? 0) + (serverStatusCounts.ambiguous ?? 0)} · comparaison de solde : {serverStatusCounts.comparison_only ?? 0}
           </Text>
         </Card>
+      ) : null}
+
+      {session && serverSmsMessages.length > 0 ? (
+        <>
+          <SectionTitle title={`Messages synchronisés (${serverSmsMessages.length})`} />
+          {serverSmsMessages.map((message) => (
+            <Card key={`server-${message.id}`}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>{message.parsed_type}</Text>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>
+                    {message.operator} · {formatDate(message.received_at)}{message.sender ? ` · ${message.sender}` : ''}
+                  </Text>
+                </View>
+                <Badge tone={message.reconciliation_status === 'matched' ? 'success' : 'warning'}>{message.reconciliation_status}</Badge>
+              </Row>
+              {message.reference ? <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Référence : {message.reference}</Text> : null}
+              {message.parsed_amount_cents !== undefined ? <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Montant détecté : {formatMoney(message.parsed_amount_cents, data.settings.currency)}</Text> : null}
+              {message.parsed_balance_cents !== undefined ? <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Solde annoncé : {formatMoney(message.parsed_balance_cents, data.settings.currency)}</Text> : null}
+              <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 17, fontFamily: 'Inter_400Regular' }}>
+                Analyse {message.parser_version} · confiance {message.confidence}. Contenu brut protégé côté serveur.
+              </Text>
+            </Card>
+          ))}
+        </>
       ) : null}
 
       <SectionTitle title={`Événements (${data.smsEvents.length})`} />

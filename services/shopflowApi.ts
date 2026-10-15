@@ -67,6 +67,25 @@ export interface ReconciliationSummary {
   reason: string;
 }
 
+export interface BackendSmsMessage {
+  id: string;
+  shop_id: string;
+  account_id?: string;
+  sender?: string;
+  operator: string;
+  parsed_type: string;
+  message_status: 'confirmed' | 'failed' | 'reversed' | 'unknown';
+  parsed_amount_cents?: number;
+  fee_cents?: number;
+  commission_cents?: number;
+  parsed_balance_cents?: number;
+  reference?: string;
+  parser_version: string;
+  confidence: 'high' | 'low';
+  reconciliation_status: string;
+  received_at: string;
+}
+
 export interface BackendAnomaly {
   id: string;
   shop_id: string;
@@ -185,6 +204,7 @@ export const shopflowApi = {
     request<{ id: string; device_key: string; status: string }>(`/api/v1/devices/${deviceId}/revoke`, { method: 'POST' }, accessToken),
   syncSmsBatch: (items: SmsSyncItem[], accessToken: string) =>
     request<SmsSyncResult[]>('/api/v1/sync/batch', { method: 'POST', body: JSON.stringify(items) }, accessToken),
+  listSmsMessages: (accessToken: string) => request<BackendSmsMessage[]>('/api/v1/sms/messages', {}, accessToken),
   getReconciliations: (accessToken: string) => request<ReconciliationSummary[]>('/api/v1/reconciliations', {}, accessToken),
   listAnomalies: (accessToken: string) => request<BackendAnomaly[]>('/api/v1/anomalies', {}, accessToken),
   reviewAnomaly: (id: string, note: string, accessToken: string) => request<BackendAnomaly>(`/api/v1/anomalies/${id}/review`, { method: 'POST', body: JSON.stringify({ note }) }, accessToken),

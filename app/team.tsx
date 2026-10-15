@@ -67,8 +67,12 @@ export default function TeamScreen() {
       return;
     }
     try {
-      await shopflowApi.createMember({ email: memberEmail, full_name: name, password: memberPassword, role: memberRole }, session.access_token);
+      const createdMember = await shopflowApi.createMember({ email: memberEmail, full_name: name, password: memberPassword, role: memberRole }, session.access_token);
+      if (memberRole === 'agent') {
+        await shopflowApi.createAgent({ name: name.trim(), user_id: createdMember.user_id }, session.access_token);
+      }
       setMembers(await shopflowApi.listMembers(session.access_token));
+      setBackendAgents(await shopflowApi.listAgents(session.access_token));
       setName('');
       setMemberEmail('');
       setMemberPassword('');
@@ -77,6 +81,8 @@ export default function TeamScreen() {
       Alert.alert('Ajout impossible', cause instanceof Error ? cause.message : 'Le backend est indisponible.');
     }
   }
+
+  const visibleAgents = session ? backendAgents : data.agents;
 
   async function changeMemberRole(userId: string, nextRole: BackendRole) {
     if (!session || session.role !== 'owner') return;
@@ -132,7 +138,7 @@ export default function TeamScreen() {
           </Text>
         </Row>
       </Card>
-      <SectionTitle title={`${data.agents.length} profil${data.agents.length === 1 ? '' : 's'}`} action={adding ? 'Fermer' : 'Ajouter'} onAction={() => setAdding(!adding)} />
+      <SectionTitle title={`${visibleAgents.length} profil${visibleAgents.length === 1 ? '' : 's'}`} action={adding ? 'Fermer' : 'Ajouter'} onAction={() => setAdding(!adding)} />
       {adding ? (
         <Card>
           <Field label="Nom affiché" placeholder="Ex. Samira D." value={name} onChangeText={setName} />
@@ -142,7 +148,26 @@ export default function TeamScreen() {
           <Button title="Créer le profil serveur" icon="user-plus" onPress={saveAgent} />
         </Card>
       ) : null}
-      {data.agents.map((agent) => (
+      {session ? backendAgents.map((agent) => {
+        const linkedMember = members.find((member) => member.user_id === agent.user_id);
+        return (
+          <Card key={agent.id}>
+            <Row>
+              <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.secondary }}>
+                <Text style={{ color: colors.primary, fontSize: 14, fontFamily: 'Inter_700Bold' }}>{agent.name.slice(0, 1).toLocaleUpperCase()}</Text>
+              </View>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: 'Inter_600SemiBold' }}>{agent.name}</Text>
+                <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>{linkedMember?.email ?? 'Profil serveur non lié à un compte'}</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                <Badge tone="info">Profil agent</Badge>
+                <Badge tone={agent.user_id ? 'success' : 'neutral'}>{agent.user_id ? 'Compte lié' : 'Sans connexion'}</Badge>
+              </View>
+            </Row>
+          </Card>
+        );
+      }) : data.agents.map((agent) => (
         <Card key={agent.id}>
           <Row>
             <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.secondary }}>
