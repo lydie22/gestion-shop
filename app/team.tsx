@@ -16,6 +16,7 @@ export default function TeamScreen() {
   const [name, setName] = useState('');
   const [members, setMembers] = useState<Array<{ user_id: string; email: string; full_name: string; role: BackendRole; active: boolean }>>([]);
   const [remoteAdding, setRemoteAdding] = useState(false);
+  const [memberSaving, setMemberSaving] = useState(false);
   const [memberEmail, setMemberEmail] = useState('');
   const [memberPassword, setMemberPassword] = useState('');
   const [memberRole, setMemberRole] = useState<Exclude<BackendRole, 'owner'>>('agent');
@@ -61,11 +62,16 @@ export default function TeamScreen() {
   }
 
   async function saveRemoteMember() {
-    if (!session || session.role !== 'owner') return;
+    if (!session || session.role !== 'owner' || memberSaving) return;
     if (memberEmail.trim().length < 5 || memberPassword.length < 10 || name.trim().length < 2) {
       Alert.alert('Informations requises', 'Nom, e-mail et mot de passe de 10 caractères minimum sont nécessaires.');
       return;
     }
+    if (members.some((member) => member.active && member.email.trim().toLocaleLowerCase() === memberEmail.trim().toLocaleLowerCase())) {
+      Alert.alert('Membre déjà présent', 'Cette adresse e-mail appartient déjà à un membre actif de cette boutique. Modifie son rôle depuis sa fiche ou utilise une autre adresse.');
+      return;
+    }
+    setMemberSaving(true);
     try {
       const createdMember = await shopflowApi.createMember({ email: memberEmail, full_name: name, password: memberPassword, role: memberRole }, session.access_token);
       if (memberRole === 'agent') {
@@ -79,6 +85,8 @@ export default function TeamScreen() {
       setRemoteAdding(false);
     } catch (cause) {
       Alert.alert('Ajout impossible', cause instanceof Error ? cause.message : 'Le backend est indisponible.');
+    } finally {
+      setMemberSaving(false);
     }
   }
 
@@ -196,7 +204,7 @@ export default function TeamScreen() {
                 <ChoiceChip label="Agent" selected={memberRole === 'agent'} onPress={() => setMemberRole('agent')} />
                 <ChoiceChip label="Superviseur" selected={memberRole === 'supervisor'} onPress={() => setMemberRole('supervisor')} />
               </View>
-              <Button title="Créer le compte sécurisé" icon="user-plus" onPress={() => void saveRemoteMember()} />
+              <Button title="Créer le compte sécurisé" icon="user-plus" loading={memberSaving} onPress={() => void saveRemoteMember()} />
             </Card>
           ) : null}
           {members.map((member) => (
