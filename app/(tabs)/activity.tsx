@@ -2,7 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { Badge, Button, Card, ChoiceChip, Field, IconButton, Row, Screen, SectionTitle, Spacer } from '@/components/shopflow/ui';
+import { Badge, Button, Card, ChoiceChip, Field, IconButton, Row, Screen, SectionTitle, SkeletonBlock, Spacer } from '@/components/shopflow/ui';
 import { formatDate, formatMoney, statusName, transactionStatusTone, transactionTypeName } from '@/components/shopflow/format';
 import { Transaction, TransactionStatus, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
@@ -94,6 +94,7 @@ export default function ActivityScreen() {
   }
 
   const transactions = remoteTransactions ?? data.transactions;
+  const remoteLoading = Boolean(session && remoteTransactions === null && !remoteError);
   const visibleTransactions = useMemo(
     () =>
       transactions.filter((transaction) => {
@@ -119,6 +120,7 @@ export default function ActivityScreen() {
         </Row>
       </Card>
       {remoteError ? <Card style={{ backgroundColor: colors.warningSurface, borderColor: colors.warningSurface }}><Text style={{ color: colors.warning, fontSize: 12, lineHeight: 17, fontFamily: 'Inter_500Medium' }}>{remoteError} Affichage local temporaire.</Text></Card> : null}
+      {remoteLoading ? <Card><SkeletonBlock width="42%" /><SkeletonBlock width="88%" height={12} style={{ marginTop: 12 }} /><SkeletonBlock width="70%" height={12} style={{ marginTop: 8 }} /></Card> : null}
       <Field
         label="Rechercher"
         placeholder="Référence, opérateur, agent…"

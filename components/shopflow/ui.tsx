@@ -134,6 +134,11 @@ export function Body({ children, muted = false, style }: { children: ReactNode; 
   return <Text style={[styles.body, { color: muted ? colors.mutedForeground : colors.foreground }, style]}>{children}</Text>;
 }
 
+export function SkeletonBlock({ width = '100%', height = 16, radius = 8, style }: { width?: number | `${number}%`; height?: number; radius?: number; style?: StyleProp<ViewStyle> }) {
+  const colors = useColors();
+  return <View accessibilityLabel="Chargement" style={[{ width, height, borderRadius: radius, backgroundColor: colors.muted }, style]} />;
+}
+
 export function Label({ children, style }: { children: ReactNode; style?: StyleProp<TextStyle> }) {
   const colors = useColors();
   return <Text style={[styles.label, { color: colors.inkSoft }, style]}>{children}</Text>;

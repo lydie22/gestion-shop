@@ -2,7 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { Badge, Body, Button, Card, Row, Screen, SectionTitle, Spacer } from '@/components/shopflow/ui';
+import { Badge, Body, Button, Card, Row, Screen, SectionTitle, SkeletonBlock, Spacer } from '@/components/shopflow/ui';
 import { formatDate, formatMoney, transactionStatusTone, transactionTypeName } from '@/components/shopflow/format';
 import { getCashBalance, getWalletBalance, operators, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
@@ -16,14 +16,17 @@ export default function DashboardScreen() {
   const isAgent = session?.role === 'agent';
   const [remoteAccounts, setRemoteAccounts] = useState<Array<BackendAccount & { balance: number; currency: string }> | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [remoteLoading, setRemoteLoading] = useState(false);
 
   useEffect(() => {
     if (!session) {
       setRemoteAccounts(null);
       setRemoteError(null);
+      setRemoteLoading(false);
       return;
     }
     let active = true;
+    setRemoteLoading(true);
     shopflowApi.listAccounts(session.access_token)
       .then(async (accounts) => {
         const balances = await Promise.all(accounts.map(async (account) => ({
@@ -38,7 +41,7 @@ export default function DashboardScreen() {
         if (!active) return;
         setRemoteAccounts(null);
         setRemoteError(error instanceof Error ? error.message : 'Soldes serveur indisponibles.');
-      });
+      }).finally(() => { if (active) setRemoteLoading(false); });
     return () => { active = false; };
   }, [session?.access_token]);
   const totalOpen = data.anomalies.filter((anomaly) => anomaly.status !== 'resolved').length;
@@ -81,11 +84,9 @@ export default function DashboardScreen() {
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={{ color: colors.heroMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>SOLDE ÉLECTRONIQUE THÉORIQUE</Text>
         </Row>
-        <Text style={{ color: colors.primaryForeground, fontSize: 35, lineHeight: 42, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] }}>
-          {formatMoney(electronicTotal, remoteAccounts?.[0]?.currency ?? data.settings.currency)}
-        </Text>
+        {remoteLoading ? <SkeletonBlock width="52%" height={42} radius={10} style={{ backgroundColor: colors.heroMuted }} /> : <Text style={{ color: colors.primaryForeground, fontSize: 35, lineHeight: 42, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] }}>{formatMoney(electronicTotal, remoteAccounts?.[0]?.currency ?? data.settings.currency)}</Text>}
         <Text style={{ color: colors.heroMuted, fontSize: 12, fontFamily: 'Inter_400Regular' }}>
-          {remoteAccounts ? 'Calculé à partir des comptes et mouvements confirmés du serveur' : session ? 'Backend indisponible · calcul local temporaire, à vérifier à la reconnexion' : 'Calculé à partir des opérations locales confirmées · jamais un solde opérateur en temps réel'}
+          {remoteLoading ? 'Récupération des soldes serveur…' : remoteAccounts ? 'Calculé à partir des comptes et mouvements confirmés du serveur' : session ? 'Backend indisponible · calcul local temporaire, à vérifier à la reconnexion' : 'Calculé à partir des opérations locales confirmées · jamais un solde opérateur en temps réel'}
         </Text>
         <Row style={{ justifyContent: 'space-between', marginTop: 3 }}>
           <Text style={{ color: colors.primaryForeground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Référence la plus récente</Text>

@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
-import { Badge, Button, Card, Field, Row, Screen, SectionTitle } from '@/components/shopflow/ui';
+import { Badge, Button, Card, Field, Row, Screen, SectionTitle, SkeletonBlock } from '@/components/shopflow/ui';
 import { formatDate, formatMoney } from '@/components/shopflow/format';
 import { BackendAccount, shopflowApi } from '@/services/shopflowApi';
 import { useAuth } from '@/context/AuthContext';
@@ -106,7 +106,7 @@ export default function AccountsScreen() {
           <Button title="Créer le compte serveur" icon="plus" onPress={() => void createAccount()} />
         </Card>
       ) : null}
-      {loading ? <Card><Text style={{ color: colors.mutedForeground, fontSize: 13, fontFamily: 'Inter_400Regular' }}>Chargement des comptes serveur…</Text></Card> : null}
+      {loading ? <Card><SkeletonBlock width="46%" /><SkeletonBlock width="82%" height={12} style={{ marginTop: 10 }} /><SkeletonBlock width="35%" height={24} style={{ marginTop: 16 }} /></Card> : null}
       {!loading && accounts.length === 0 && !error ? <Card><Text style={{ color: colors.mutedForeground, fontSize: 13, lineHeight: 18, textAlign: 'center', fontFamily: 'Inter_400Regular' }}>Aucun compte n’est encore attribué à cette boutique.</Text></Card> : null}
       {accounts.map((account) => {
         const balance = balances[account.id];
