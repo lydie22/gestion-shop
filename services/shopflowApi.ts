@@ -177,7 +177,7 @@ async function request<T>(path: string, init: RequestInit = {}, accessToken?: st
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = response.status === 401
-      ? 'Identifiants invalides ou compte absent sur le serveur Render.'
+      ? 'Compte ShopFlow introuvable ou mot de passe incorrect. Les comptes créés directement dans Supabase Auth ne sont pas encore des comptes ShopFlow : utilise « Créer une nouvelle boutique » ou fais créer le membre depuis « Agents & rôles ». '
       : response.status === 503
         ? 'Le backend est démarré mais sa base de données n’est pas prête.'
         : typeof body.detail === 'string' ? body.detail : `La requête backend a échoué (${response.status}).`;

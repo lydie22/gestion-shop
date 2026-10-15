@@ -312,6 +312,7 @@ const ShopFlowContext = createContext<ShopFlowContextValue | null>(null);
 
 export function ShopFlowProvider({ children }: { children: ReactNode }) {
   const { session, accessibleShops } = useAuth();
+  const actorLabel = session?.full_name?.trim() || 'Utilisateur hors ligne';
   const storageKey = session ? `${STORAGE_KEY}.${session.shop_id}` : `${STORAGE_KEY}.local`;
   const [data, setData] = useState<ShopData>(() => emptyData());
   const [isReady, setIsReady] = useState(false);
@@ -559,13 +560,13 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
       {
         id: makeId('audit'),
         at: new Date().toISOString(),
-        actor: 'Utilisateur local',
+        actor: actorLabel,
         action,
         detail,
       },
       ...current.auditEvents,
     ],
-    [],
+    [actorLabel],
   );
 
   const addTransaction = useCallback(
@@ -591,7 +592,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         cashDeltaCents: cashDirection * amount,
         status: input.status,
         matchStatus: input.status === 'confirmed' ? 'matched' : 'unmatched',
-        agent: input.agent.trim() || 'Utilisateur local',
+        agent: input.agent.trim() || actorLabel,
         note: input.note.trim(),
         source: 'manual',
         createdAt: new Date().toISOString(),
@@ -627,7 +628,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         ),
       }));
     },
-    [recordAudit],
+    [actorLabel, recordAudit],
   );
 
   const cancelTransaction = useCallback(
@@ -678,7 +679,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
           cashDeltaCents: -original.cashDeltaCents,
           status: 'confirmed',
           matchStatus: 'review',
-          agent: 'Utilisateur local',
+          agent: actorLabel,
           note: `Inversion de ${original.reference || id}. Motif : ${note.trim()}`,
           source: 'manual',
           createdAt: at,
@@ -694,7 +695,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
           amountCents: original.amountCents,
           operator: original.operator,
           reference: reversal.reference,
-          agent: 'Utilisateur local',
+          agent: actorLabel,
           createdAt: at,
           history: [{ at, text: `Inversion déclarée : ${note.trim()}` }],
         };
@@ -709,7 +710,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         };
       });
     },
-    [recordAudit],
+    [actorLabel, recordAudit],
   );
 
   const addCashMovement = useCallback(
@@ -718,7 +719,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         ...movement,
         id: makeId('cash'),
         createdAt: new Date().toISOString(),
-        agent: 'Utilisateur local',
+        agent: actorLabel,
       };
       setData((current) => ({
         ...current,
@@ -726,7 +727,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         auditEvents: recordAudit(current, 'Mouvement de caisse saisi', `${record.note} · ${record.status}`),
       }));
     },
-    [recordAudit],
+    [actorLabel, recordAudit],
   );
 
   const reviewCashMovement = useCallback(
@@ -765,7 +766,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
           openingTheoreticalCents: theoretical,
           openingVarianceCents: variance,
           openingExplanation: explanation.trim(),
-          agent: 'Utilisateur local',
+          agent: actorLabel,
         };
         const openingAnomaly: Anomaly | null = variance === 0 ? null : {
           id: makeId('anomaly'),
@@ -775,7 +776,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
           status: 'open',
           description: `Comptage d’ouverture : ${openingCountCents} centimes. Théorique : ${theoretical} centimes. Écart conservé sans ajustement automatique.`,
           amountCents: Math.abs(variance),
-          agent: 'Utilisateur local',
+          agent: actorLabel,
           createdAt: openedAt,
           history: [{ at: openedAt, text: `Session ouverte avec un écart de ${variance} centimes. Motif : ${explanation.trim() || 'Non fourni'}` }],
         };
@@ -787,7 +788,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         };
       });
     },
-    [recordAudit],
+    [actorLabel, recordAudit],
   );
 
   const closeCashSession = useCallback(
@@ -817,7 +818,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
                 status: 'open',
                 description: `Comptage : ${closingCountCents} centimes. Théorique : ${theoretical} centimes. Écart conservé sans ajustement automatique.`,
                 amountCents: Math.abs(variance),
-                agent: 'Utilisateur local',
+                agent: actorLabel,
                 createdAt: new Date().toISOString(),
                 history: [{ at: new Date().toISOString(), text: 'Clôture enregistrée ; la différence reste visible.' }],
               };
@@ -834,7 +835,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         };
       });
     },
-    [recordAudit],
+    [actorLabel, recordAudit],
   );
 
   const setAnomalyStatus = useCallback(
