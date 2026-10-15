@@ -19,7 +19,7 @@ function readCents(value: string) {
 }
 
 export default function NewTransactionScreen() {
-  const { addTransaction, data } = useShopFlow();
+  const { addTransaction, data, refreshServerData } = useShopFlow();
   const colors = useColors();
   const { session } = useAuth();
   const [backendAccounts, setBackendAccounts] = useState<BackendAccount[]>([]);
@@ -116,27 +116,32 @@ export default function NewTransactionScreen() {
       note,
       idempotency_key: createIdempotencyKey('mobile-tx'),
     } : null;
+    let persistedOnServer = false;
     if (session && backendAccount && serverPayload) {
       try {
         const serverTransaction = await shopflowApi.createTransaction(serverPayload, session.access_token);
         serverMessage = ` Serveur : ${serverTransaction.reconciliation_status}.`;
+        persistedOnServer = true;
+        refreshServerData();
       } catch (cause) {
         if (serverPayload) await enqueueTransaction(session.shop_id, serverPayload);
         setBackendError(cause instanceof Error ? cause.message : 'Synchronisation serveur impossible.');
         serverMessage = ' Serveur indisponible : conservée localement pour synchronisation ultérieure.';
       }
     }
-    addTransaction({
-      operator,
-      type,
-      amountCents,
-      feeCents: Number.isFinite(feeCents) ? feeCents : 0,
-      commissionCents: Number.isFinite(commissionCents) ? commissionCents : 0,
-      reference,
-      agent,
-      note,
-      status,
-    });
+    if (!persistedOnServer) {
+      addTransaction({
+        operator,
+        type,
+        amountCents,
+        feeCents: Number.isFinite(feeCents) ? feeCents : 0,
+        commissionCents: Number.isFinite(commissionCents) ? commissionCents : 0,
+        reference,
+        agent,
+        note,
+        status,
+      });
+    }
     Alert.alert(
       'Opération enregistrée',
       status === 'confirmed'
