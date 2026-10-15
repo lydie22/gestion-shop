@@ -258,7 +258,7 @@ export default function CashScreen() {
             <View style={{ alignItems: 'flex-end', gap: 5 }}>
               <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_700Bold' }}>{movement.deltaCents > 0 ? '+' : movement.deltaCents < 0 ? '−' : ''}{formatMoney(Math.abs(movement.deltaCents), data.settings.currency)}</Text>
               <Badge tone={movement.status === 'confirmed' ? 'success' : movement.status === 'rejected' ? 'danger' : 'warning'}>
-                {movement.status === 'confirmed' ? 'Local' : movement.status === 'rejected' ? 'Rejeté' : 'En attente'}
+                {movement.status === 'confirmed' ? movement.serverId ? 'Serveur' : 'Local' : movement.status === 'rejected' ? 'Rejeté' : 'En attente'}
               </Badge>
             </View>
           </Row>

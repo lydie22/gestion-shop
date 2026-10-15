@@ -309,12 +309,12 @@ export default function ReportsScreen() {
   }
 
   return (
-    <Screen title="Rapports" subtitle="Synthèse à partir des données locales" back>
+    <Screen title="Rapports" subtitle={session ? 'Synthèse boutique · serveur et hors ligne signalé' : 'Synthèse locale non synchronisée'} back>
       <Card style={{ backgroundColor: colors.infoSurface, borderColor: colors.infoSurface }}>
         <Row style={{ alignItems: 'flex-start' }}>
           <Feather name="info" size={17} color={colors.secondaryForeground} />
           <Text style={{ flex: 1, color: colors.secondaryForeground, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_500Medium' }}>
-            Ce rapport est local et incomplet par conception : il ne contient que les événements présents sur cet appareil.
+            {session ? 'Les synthèses serveur ci-dessous sont filtrées par boutique et permissions. Les détails locaux sont conservés séparément lorsqu’une synchronisation est incomplète.' : 'Ce rapport est local et incomplet par conception : il ne contient que les événements présents sur cet appareil.'}
           </Text>
         </Row>
       </Card>

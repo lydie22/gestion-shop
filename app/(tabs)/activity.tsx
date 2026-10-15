@@ -87,7 +87,7 @@ export default function ActivityScreen() {
         <Row>
           <Feather name="database" size={17} color={colors.secondaryForeground} />
           <Text style={{ color: colors.secondaryForeground, flex: 1, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_500Medium' }}>
-            Le journal reste sur cet appareil. Une saisie manuelle n’est pas une confirmation de l’opérateur.
+            {session ? 'Les opérations confirmées par le backend sont partagées dans la boutique. Une saisie manuelle reste distincte d’une confirmation de l’opérateur.' : 'Le journal reste sur cet appareil. Une saisie manuelle n’est pas une confirmation de l’opérateur.'}
           </Text>
         </Row>
       </Card>

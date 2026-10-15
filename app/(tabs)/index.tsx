@@ -201,7 +201,9 @@ export default function DashboardScreen() {
                 {formatMoney(transaction.amountCents, data.settings.currency)}
               </Text>
               <Badge tone={transactionStatusTone(transaction.status)}>
-                {transaction.status === 'confirmed' ? 'Confirmée localement' : 'À confirmer'}
+                {transaction.source === 'server'
+                  ? transaction.status === 'confirmed' ? 'Confirmée serveur' : transaction.status === 'pending' ? 'En attente serveur' : transaction.status
+                  : transaction.status === 'confirmed' ? 'Confirmée localement' : 'À confirmer'}
               </Badge>
             </View>
           </Row>
