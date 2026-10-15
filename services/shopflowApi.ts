@@ -220,6 +220,10 @@ export const shopflowApi = {
   assignAccount: (accountId: string, input: { agent_id: string; assignment_role: 'operator' | 'shared_operator' | 'supervisor' }, accessToken: string) => request<{ id: string; account_id: string; agent_id: string; active: boolean }>(`/api/v1/accounts/${accountId}/assignments`, { method: 'POST', body: JSON.stringify(input) }, accessToken),
   createTransaction: (input: { account_id: string; agent_id?: string; reference: string; operation_type: string; amount_cents: number; fee_cents: number; commission_expected_cents: number; status: string; source: 'manual'; note?: string; idempotency_key: string }, accessToken: string) =>
     request<{ id: string; status: string; reconciliation_status: string }>('/api/v1/transactions', { method: 'POST', body: JSON.stringify(input) }, accessToken),
+  cancelTransaction: (id: string, reason: string, accessToken: string) =>
+    request<BackendTransaction>(`/api/v1/transactions/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }, accessToken),
+  reverseTransaction: (id: string, reason: string, accessToken: string) =>
+    request<BackendTransaction>(`/api/v1/transactions/${id}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) }, accessToken),
   getBalance: (accountId: string, accessToken: string) =>
     request<{ account_id: string; theoretical_balance_cents: number; currency: string; last_observed_balance_cents?: number; last_observed_at?: string; last_observed_source?: string; last_observed_verification_status?: string; last_observed_age_seconds?: number; confirmed_movement_count: number; last_movement_at?: string }>(`/api/v1/accounts/${accountId}/balance`, {}, accessToken),
   getCommissions: (accessToken: string) => request<CommissionSummary>('/api/v1/commissions', {}, accessToken),

@@ -6,10 +6,13 @@ import { Badge, Button, Card, Field, Row, Screen, SectionTitle } from '@/compone
 import { anomalySeverityName, anomalyTone, formatDate, formatMoney } from '@/components/shopflow/format';
 import { useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
+import { shopflowApi } from '@/services/shopflowApi';
 
 export default function AnomalyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data, setAnomalyStatus } = useShopFlow();
+  const { data, setAnomalyStatus, refreshServerData } = useShopFlow();
+  const { session } = useAuth();
   const colors = useColors();
   const [note, setNote] = useState('');
   const anomaly = data.anomalies.find((item) => item.id === id);
@@ -36,9 +39,20 @@ export default function AnomalyDetailScreen() {
       Alert.alert('Justification requise', 'Ajoute une explication courte à l’historique avant de résoudre le dossier.');
       return;
     }
-    setAnomalyStatus(anomalyId!, 'resolved', note);
+    const resolution = note.trim();
+    if (session && anomaly?.source === 'server') {
+      void shopflowApi.resolveAnomaly(anomalyId!, resolution, session.access_token)
+        .then(() => {
+          refreshServerData();
+          setNote('');
+          Alert.alert('Dossier mis à jour', 'La résolution est enregistrée sur le serveur et dans le journal d’audit.');
+        })
+        .catch((error: unknown) => Alert.alert('Résolution refusée', error instanceof Error ? error.message : 'Le serveur a refusé cette résolution.'));
+      return;
+    }
+    setAnomalyStatus(anomalyId!, 'resolved', resolution);
     setNote('');
-    Alert.alert('Dossier mis à jour', 'La résolution est inscrite dans le journal local. Aucun solde n’a été ajusté automatiquement.');
+    Alert.alert('Dossier mis à jour', 'La résolution locale reste visible sur cet appareil et sera synchronisée selon le flux prévu.');
   }
 
   return (
@@ -77,7 +91,17 @@ export default function AnomalyDetailScreen() {
                   Alert.alert('Note requise', 'Ajoute une note pour expliquer l’examen.');
                   return;
                 }
-                setAnomalyStatus(anomaly.id, 'in_review', note);
+                const reviewNote = note.trim();
+                if (session && anomaly.source === 'server') {
+                  void shopflowApi.reviewAnomaly(anomaly.id, reviewNote, session.access_token)
+                    .then(() => {
+                      refreshServerData();
+                      setNote('');
+                    })
+                    .catch((error: unknown) => Alert.alert('Mise en revue refusée', error instanceof Error ? error.message : 'Le serveur a refusé cette action.'));
+                  return;
+                }
+                setAnomalyStatus(anomaly.id, 'in_review', reviewNote);
                 setNote('');
               }} />
             </View>

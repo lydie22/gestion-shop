@@ -134,6 +134,7 @@ export interface Anomaly {
   createdAt: string;
   resolution?: string;
   history: { at: string; text: string }[];
+  source?: 'manual' | 'server';
 }
 
 export interface SmsEvent {
@@ -294,6 +295,7 @@ interface ShopFlowContextValue {
   data: ShopData;
   isReady: boolean;
   storageIssue: boolean;
+  refreshServerData: () => void;
   addTransaction: (input: NewTransaction) => void;
   cancelTransaction: (id: string, note: string) => void;
   reverseTransaction: (id: string, note: string) => void;
@@ -318,10 +320,12 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
   const [isReady, setIsReady] = useState(false);
   const [loadedStorageKey, setLoadedStorageKey] = useState<string | null>(null);
   const [storageIssue, setStorageIssue] = useState(false);
+  const [serverRefreshNonce, setServerRefreshNonce] = useState(0);
   const skipNextSave = useRef(false);
   // Serialize persistence writes so a slower write for an older state cannot
   // finish after a newer state and overwrite it locally.
   const persistenceChain = useRef<Promise<void>>(Promise.resolve());
+  const refreshServerData = useCallback(() => setServerRefreshNonce((value) => value + 1), []);
 
   useEffect(() => {
     let active = true;
@@ -447,6 +451,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         createdAt: row.created_at,
         resolution: row.resolved_at,
         history: row.history ?? [],
+        source: 'server',
       }));
 
       const serverAgents: Agent[] = agents.map((agent) => ({
@@ -511,7 +516,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
 
     void syncServerSnapshot();
     return () => { active = false; };
-  }, [accessibleShops, isReady, loadedStorageKey, session?.access_token, session?.shop_id, storageKey]);
+  }, [accessibleShops, isReady, loadedStorageKey, serverRefreshNonce, session?.access_token, session?.shop_id, storageKey]);
 
   useEffect(() => {
     if (isReady && loadedStorageKey === storageKey) {
@@ -1007,6 +1012,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
       data,
       isReady,
       storageIssue,
+    refreshServerData,
       addTransaction,
       cancelTransaction,
       reverseTransaction,

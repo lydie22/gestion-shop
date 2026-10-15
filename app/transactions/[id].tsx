@@ -6,10 +6,13 @@ import { Badge, Button, Card, Divider, Field, Row, Screen, SectionTitle } from '
 import { formatDate, formatMoney, matchStatusName, statusName, transactionStatusTone, transactionTypeName } from '@/components/shopflow/format';
 import { useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
+import { shopflowApi } from '@/services/shopflowApi';
 
 export default function TransactionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data, cancelTransaction, reverseTransaction } = useShopFlow();
+  const { data, cancelTransaction, reverseTransaction, refreshServerData } = useShopFlow();
+  const { session } = useAuth();
   const colors = useColors();
   const [decisionNote, setDecisionNote] = useState('');
   const transaction = data.transactions.find((item) => item.id === id);
@@ -92,9 +95,20 @@ export default function TransactionDetailScreen() {
               Alert.alert('Motif requis', 'Ajoute une explication avant d’annuler.');
               return;
             }
-            cancelTransaction(transaction.id, decisionNote);
+            const reason = decisionNote.trim();
+            if (session && transaction.source === 'server') {
+              void shopflowApi.cancelTransaction(transaction.id, reason, session.access_token)
+                .then(() => {
+                  refreshServerData();
+                  setDecisionNote('');
+                  Alert.alert('Saisie annulée', 'L’annulation est enregistrée sur le serveur et dans le journal d’audit.');
+                })
+                .catch((error: unknown) => Alert.alert('Annulation refusée', error instanceof Error ? error.message : 'Le serveur a refusé cette annulation.'));
+              return;
+            }
+            cancelTransaction(transaction.id, reason);
             setDecisionNote('');
-            Alert.alert('Saisie annulée', 'L’entrée et le motif restent visibles dans le journal local.');
+            Alert.alert('Saisie annulée', 'L’entrée locale et le motif restent visibles dans le journal de cet appareil.');
           }} />
         </Card>
       ) : transaction.status === 'confirmed' && !linkedReversal ? (
@@ -109,9 +123,20 @@ export default function TransactionDetailScreen() {
               Alert.alert('Motif requis', 'Ajoute une justification avant de créer l’inversion.');
               return;
             }
-            reverseTransaction(transaction.id, decisionNote);
+            const reason = decisionNote.trim();
+            if (session && transaction.source === 'server') {
+              void shopflowApi.reverseTransaction(transaction.id, reason, session.access_token)
+                .then(() => {
+                  refreshServerData();
+                  setDecisionNote('');
+                  Alert.alert('Inversion enregistrée', 'L’écriture compensatoire est enregistrée sur le serveur et dans le journal d’audit.');
+                })
+                .catch((error: unknown) => Alert.alert('Inversion refusée', error instanceof Error ? error.message : 'Le serveur a refusé cette inversion.'));
+              return;
+            }
+            reverseTransaction(transaction.id, reason);
             setDecisionNote('');
-            Alert.alert('Inversion locale créée', 'Une alerte de contrôle a été ouverte. Vérifie la transaction et l’écriture liée avec une preuve indépendante.');
+            Alert.alert('Inversion locale créée', 'L’écriture reste locale et doit être synchronisée avant d’être considérée comme serveur.');
           }} />
         </Card>
       ) : null}

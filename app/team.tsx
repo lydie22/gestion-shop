@@ -73,10 +73,9 @@ export default function TeamScreen() {
     }
     setMemberSaving(true);
     try {
-      const createdMember = await shopflowApi.createMember({ email: memberEmail, full_name: name, password: memberPassword, role: memberRole }, session.access_token);
-      if (memberRole === 'agent') {
-        await shopflowApi.createAgent({ name: name.trim(), user_id: createdMember.user_id }, session.access_token);
-      }
+      await shopflowApi.createMember({ email: memberEmail, full_name: name, password: memberPassword, role: memberRole }, session.access_token);
+      // Le backend crée déjà le profil `agents` lorsqu'un membre reçoit le rôle
+      // agent. Un second POST /agents provoquerait un 409 pour le même user_id.
       setMembers(await shopflowApi.listMembers(session.access_token));
       setBackendAgents(await shopflowApi.listAgents(session.access_token));
       setName('');
