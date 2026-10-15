@@ -7,8 +7,11 @@ import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
 
 function LiquidTabs() {
+  const { session } = useAuth();
+  const isAgent = session?.role === 'agent';
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
@@ -19,10 +22,12 @@ function LiquidTabs() {
         <NativeTabs.Trigger.Icon sf={{ default: 'list.bullet.rectangle', selected: 'list.bullet.rectangle.fill' }} />
         <NativeTabs.Trigger.Label>Opérations</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="controls">
-        <NativeTabs.Trigger.Icon sf={{ default: 'checkmark.shield', selected: 'checkmark.shield.fill' }} />
-        <NativeTabs.Trigger.Label>Contrôles</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
+      {!isAgent ? (
+        <NativeTabs.Trigger name="controls">
+          <NativeTabs.Trigger.Icon sf={{ default: 'checkmark.shield', selected: 'checkmark.shield.fill' }} />
+          <NativeTabs.Trigger.Label>Contrôles</NativeTabs.Trigger.Label>
+        </NativeTabs.Trigger>
+      ) : null}
       <NativeTabs.Trigger name="cash">
         <NativeTabs.Trigger.Icon sf={{ default: 'banknote', selected: 'banknote.fill' }} />
         <NativeTabs.Trigger.Label>Caisse</NativeTabs.Trigger.Label>
@@ -37,6 +42,7 @@ function LiquidTabs() {
 
 function ClassicTabs() {
   const colors = useColors();
+  const { session } = useAuth();
   const isDark = useColorScheme() === 'dark';
   const isIOS = Platform.OS === 'ios';
   const isWeb = Platform.OS === 'web';
@@ -96,7 +102,7 @@ function ClassicTabs() {
     >
       <Tabs.Screen name="index" options={{ title: 'Accueil' }} />
       <Tabs.Screen name="activity" options={{ title: 'Opérations' }} />
-      <Tabs.Screen name="controls" options={{ title: 'Contrôles' }} />
+      <Tabs.Screen name="controls" options={{ title: 'Contrôles', href: session?.role === 'agent' ? null : undefined }} />
       <Tabs.Screen name="cash" options={{ title: 'Caisse' }} />
       <Tabs.Screen name="more" options={{ title: 'Plus' }} />
     </Tabs>

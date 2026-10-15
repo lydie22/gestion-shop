@@ -8,32 +8,29 @@ import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
 
 const menu = [
-  { title: 'Rapports & commissions', detail: 'Synthèse journalière, par opérateur et par agent', icon: 'bar-chart-2' as const, route: '/reports' },
-  { title: 'Journal financier', detail: 'Reconstituer chaque solde depuis un point de référence', icon: 'list' as const, route: '/ledger' },
-  { title: 'Scénarios de contrôle', detail: 'Liste de suivi des 12 vérifications recommandées', icon: 'check-square' as const, route: '/checklist' },
-  { title: 'Messages SMS', detail: 'Importer et rapprocher les événements autorisés', icon: 'message-square' as const, route: '/sms' },
-  { title: 'Agents & rôles', detail: 'Profils, permissions et affectations de la boutique', icon: 'users' as const, route: '/team' },
-  { title: 'Journal d’audit', detail: 'Historique des actions sensibles côté serveur', icon: 'clock' as const, route: '/audit' },
-  { title: 'Paramètres de la boutique', detail: 'Devise, seuil d’écart et données locales', icon: 'settings' as const, route: '/settings' },
+  { title: 'Rapports & commissions', detail: 'Synthèse de vos opérations et commissions', icon: 'bar-chart-2' as const, route: '/reports', roles: ['owner', 'supervisor', 'agent'] },
+  { title: 'Journal financier', detail: 'Soldes et mouvements des comptes autorisés', icon: 'list' as const, route: '/ledger', roles: ['owner', 'supervisor', 'agent'] },
+  { title: 'Scénarios de contrôle', detail: 'Liste de suivi des vérifications recommandées', icon: 'check-square' as const, route: '/checklist', roles: ['owner', 'supervisor'] },
+  { title: 'Messages SMS', detail: 'Importer et rapprocher les événements autorisés', icon: 'message-square' as const, route: '/sms', roles: ['owner', 'supervisor', 'agent'] },
+  { title: 'Agents & rôles', detail: 'Membres, permissions et affectations de la boutique', icon: 'users' as const, route: '/team', roles: ['owner', 'supervisor'] },
+  { title: 'Journal d’audit', detail: 'Historique des actions sensibles côté serveur', icon: 'clock' as const, route: '/audit', roles: ['owner', 'supervisor'] },
+  { title: 'Paramètres de la boutique', detail: 'Devise, seuil d’écart et données locales', icon: 'settings' as const, route: '/settings', roles: ['owner', 'supervisor'] },
 ] as const;
 
 export default function MoreScreen() {
   const colors = useColors();
   const { data } = useShopFlow();
   const { session, logout } = useAuth();
-  const visibleMenu = menu.filter((item) => {
-    if (!session || session.role !== 'agent') return true;
-    return item.route !== '/team' && item.route !== '/audit';
-  });
+  const visibleMenu = menu.filter((item) => session ? (item.roles as readonly string[]).includes(session.role) : item.route !== '/team' && item.route !== '/audit');
   return (
     <Screen title="Plus" subtitle={data.settings.shopName}>
       <Card style={{ backgroundColor: colors.hero, borderColor: colors.hero }}>
         <Row style={{ alignItems: 'flex-start' }}>
           <Feather name="smartphone" size={20} color={colors.primaryForeground} />
           <View style={{ flex: 1, gap: 6 }}>
-            <Text style={{ color: colors.primaryForeground, fontSize: 15, fontFamily: 'Inter_700Bold' }}>{session ? `Connecté · rôle ${session.role}` : 'Mode local sur un appareil'}</Text>
+            <Text style={{ color: colors.primaryForeground, fontSize: 15, fontFamily: 'Inter_700Bold' }}>{session ? session.role === 'agent' ? 'Espace agent' : 'Espace responsable' : 'Mode local sur un appareil'}</Text>
             <Text style={{ color: colors.heroMuted, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
-              {session ? 'Les opérations sensibles sont autorisées par le backend et chaque boutique possède son propre périmètre de données.' : 'Les données restent dans le stockage de l’application. Les rôles présentés ne remplacent ni une connexion ni des autorisations sécurisées.'}
+              {session ? session.role === 'agent' ? 'Saisis tes opérations et suis les comptes qui te sont affectés. Les dossiers de contrôle sont traités par un responsable.' : 'Gère les membres, les affectations, les contrôles et les données de ta boutique. Les permissions sont vérifiées par le backend.' : 'Les données restent dans le stockage de l’application. Les rôles présentés ne remplacent ni une connexion ni des autorisations sécurisées.'}
             </Text>
           </View>
         </Row>

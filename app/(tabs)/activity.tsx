@@ -54,7 +54,7 @@ export default function ActivityScreen() {
         matchStatus: (row.reconciliation_status as Transaction['matchStatus']) || 'unmatched',
         agent: row.agent_id ? (agentNames.get(row.agent_id) ?? 'Agent') : 'Non attribué',
         note: row.note ?? 'Transaction synchronisée depuis le backend.',
-        source: 'manual',
+        source: 'server',
         createdAt: row.created_at,
       })));
       setRemoteError(null);

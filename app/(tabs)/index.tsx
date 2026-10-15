@@ -13,6 +13,7 @@ export default function DashboardScreen() {
   const { data, isReady, storageIssue } = useShopFlow();
   const colors = useColors();
   const { session } = useAuth();
+  const isAgent = session?.role === 'agent';
   const [remoteAccounts, setRemoteAccounts] = useState<Array<BackendAccount & { balance: number; currency: string }> | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
 
@@ -58,16 +59,18 @@ export default function DashboardScreen() {
   const discrepancyReported = Math.max(0, discrepancyCalculated - (balanceDiscrepancy?.amountCents ?? 0));
   const serverElectronicTotal = remoteAccounts?.reduce((sum, account) => sum + account.balance, 0) ?? 0;
   const electronicTotal = remoteAccounts ? serverElectronicTotal : operators.reduce((sum, operator) => sum + getWalletBalance(data, operator), 0);
+  const secondaryMetric = isAgent ? confirmedToday : totalOpen;
+  const secondaryMetricLabel = isAgent ? 'opération confirmée' : 'dossier ouvert';
 
   return (
     <Screen
       title={`Bonjour, ${session?.full_name?.split(' ')[0] || 'à toi'}`}
-      subtitle={data.settings.shopName}
+      subtitle={`${data.settings.shopName} · ${isAgent ? 'espace agent' : session ? 'espace responsable' : 'mode local'}`}
       right={
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Paramètres"
-          onPress={() => router.push('/settings')}
+          onPress={() => router.push(isAgent ? '/reports' : '/settings')}
           style={{ padding: 8 }}
         >
           <Feather name="settings" size={20} color={colors.foreground} />
@@ -103,9 +106,9 @@ export default function DashboardScreen() {
           </Text>
         </Card>
         <Card style={{ flex: 1 }}>
-          <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_500Medium' }}>À surveiller</Text>
+          <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_500Medium' }}>{isAgent ? 'Mon activité' : 'À surveiller'}</Text>
           <Text style={{ color: totalOpen ? colors.warning : colors.foreground, fontSize: 19, fontFamily: 'Inter_700Bold' }}>
-            {totalOpen} dossier{totalOpen === 1 ? '' : 's'}
+            {secondaryMetric} {secondaryMetricLabel}{secondaryMetric === 1 ? '' : 's'}
           </Text>
           <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>
             {pending} opération{pending === 1 ? '' : 's'} en attente
