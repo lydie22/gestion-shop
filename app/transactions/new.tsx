@@ -7,7 +7,7 @@ import { formatMoney } from '@/components/shopflow/format';
 import { Operator, operators, TransactionStatus, TransactionType, transactionTypeLabel, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
-import { BackendAccount, shopflowApi } from '@/services/shopflowApi';
+import { BackendAccount, BackendAgent, shopflowApi } from '@/services/shopflowApi';
 import { enqueueTransaction, readPendingTransactions, removePendingTransaction } from '@/services/syncQueue';
 import { createIdempotencyKey } from '@/services/idempotency';
 
@@ -23,7 +23,9 @@ export default function NewTransactionScreen() {
   const colors = useColors();
   const { session } = useAuth();
   const [backendAccounts, setBackendAccounts] = useState<BackendAccount[]>([]);
+  const [backendAgents, setBackendAgents] = useState<BackendAgent[]>([]);
   const [backendAccountId, setBackendAccountId] = useState<string | null>(null);
+  const [backendAgentId, setBackendAgentId] = useState<string | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [operator, setOperator] = useState<Operator>(operators[0]);
   const [type, setType] = useState<TransactionType>('deposit');
@@ -31,16 +33,21 @@ export default function NewTransactionScreen() {
   const [fee, setFee] = useState('');
   const [commission, setCommission] = useState('');
   const [reference, setReference] = useState('');
-  const [agent, setAgent] = useState(data.agents[0]?.name ?? 'Utilisateur local');
+  const [agent, setAgent] = useState(data.agents[0]?.name ?? 'Non attribué');
   const [note, setNote] = useState('');
   const [status, setStatus] = useState<TransactionStatus>('pending');
 
   useEffect(() => {
     if (!session) return;
-    shopflowApi.listAccounts(session.access_token).then((accounts) => {
-      setBackendAccounts(accounts);
-      setBackendAccountId((current) => current && accounts.some((item) => item.id === current && item.active) ? current : accounts.find((item) => item.operator === operator && item.active)?.id ?? null);
-    }).catch((cause) => setBackendError(cause instanceof Error ? cause.message : 'Comptes backend indisponibles.'));
+    Promise.all([shopflowApi.listAccounts(session.access_token), shopflowApi.listAgents(session.access_token)])
+      .then(([accounts, agents]) => {
+        setBackendAccounts(accounts);
+        setBackendAgents(agents);
+        setBackendAccountId((current) => current && accounts.some((item) => item.id === current && item.active) ? current : accounts.find((item) => item.operator === operator && item.active)?.id ?? null);
+        setBackendAgentId((current) => current && agents.some((item) => item.id === current && item.active) ? current : agents[0]?.id ?? null);
+        setAgent((current) => agents.find((item) => item.id === (backendAgentId ?? agents[0]?.id))?.name ?? current);
+      })
+      .catch((cause) => setBackendError(cause instanceof Error ? cause.message : 'Comptes et agents backend indisponibles.'));
   }, [session]);
 
   useEffect(() => {
@@ -98,6 +105,7 @@ export default function NewTransactionScreen() {
     let serverMessage = '';
     const serverPayload = session && backendAccount ? {
       account_id: backendAccount.id,
+      agent_id: backendAgentId ?? undefined,
       reference: reference.trim() || `LOCAL-${Date.now()}`,
       operation_type: type,
       amount_cents: amountCents,
@@ -184,8 +192,23 @@ export default function NewTransactionScreen() {
 
       <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Agent associé</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        {data.agents.map((item) => <ChoiceChip key={item.id} label={item.name} selected={agent === item.name} onPress={() => setAgent(item.name)} />)}
+        {(session ? backendAgents : data.agents).map((item) => (
+          <ChoiceChip
+            key={item.id}
+            label={item.name}
+            selected={session ? backendAgentId === item.id : agent === item.name}
+            onPress={() => {
+              setAgent(item.name);
+              if (session) setBackendAgentId(item.id);
+            }}
+          />
+        ))}
       </View>
+      {(session ? backendAgents : data.agents).length === 0 ? (
+        <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>
+          Aucun profil agent disponible ; l’opération sera enregistrée sans attribution.
+        </Text>
+      ) : null}
       <Field label="Note (facultatif)" placeholder="Détail utile au rapprochement" value={note} onChangeText={setNote} multiline />
 
       <Card>

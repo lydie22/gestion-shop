@@ -15,6 +15,7 @@ export default function AuthScreen() {
   const [fullName, setFullName] = useState('');
   const [shopName, setShopName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function submit() {
     if (!email.trim() || password.length < 10 || (isRegister && (!fullName.trim() || !shopName.trim()))) {
@@ -46,7 +47,24 @@ export default function AuthScreen() {
           {isRegister ? <Field label="Nom complet" placeholder="Ex. Mireille K." value={fullName} onChangeText={setFullName} autoCapitalize="words" /> : null}
           {isRegister ? <Field label="Nom de la boutique" placeholder="Ex. Boutique centrale" value={shopName} onChangeText={setShopName} autoCapitalize="words" /> : null}
           <Field label="Adresse e-mail" placeholder="vous@exemple.com" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoComplete="email" />
-          <Field label="Mot de passe" placeholder="10 caractères minimum" value={password} onChangeText={setPassword} secureTextEntry autoComplete={isRegister ? 'new-password' : 'current-password'} />
+          <Field
+            label="Mot de passe"
+            placeholder="10 caractères minimum"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword}
+            autoComplete={isRegister ? 'new-password' : 'current-password'}
+            rightAccessory={(
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                hitSlop={10}
+                onPress={() => setShowPassword((visible) => !visible)}
+              >
+                <Feather name={showPassword ? 'eye-off' : 'eye'} size={19} color={colors.mutedForeground} />
+              </Pressable>
+            )}
+          />
           {error ? <Text style={[styles.error, { color: colors.destructive }]}>{error}</Text> : null}
           <Button title={isRegister ? 'Créer et continuer' : 'Se connecter'} icon="arrow-right" onPress={submit} loading={loading} />
         </Card>

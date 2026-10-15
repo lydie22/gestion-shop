@@ -226,24 +226,28 @@ export function Field({
   error,
   multiline,
   style,
+  rightAccessory,
   ...inputProps
-}: Omit<TextInputProps, 'style'> & { label: string; error?: string; style?: StyleProp<ViewStyle> }) {
+}: Omit<TextInputProps, 'style'> & { label: string; error?: string; style?: StyleProp<ViewStyle>; rightAccessory?: ReactNode }) {
   const colors = useColors();
   return (
     <View style={[styles.fieldWrap, style]}>
       <Text style={[styles.fieldLabel, { color: colors.foreground }]}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        placeholderTextColor={colors.mutedForeground}
-        selectionColor={colors.primary}
-        multiline={multiline}
-        style={[
-          styles.input,
-          { backgroundColor: colors.card, borderColor: error ? colors.destructive : colors.input, color: colors.foreground },
-          multiline && styles.multiline,
-        ]}
-        {...inputProps}
-      />
+      <View style={styles.inputWrap}>
+        <TextInput
+          accessibilityLabel={label}
+          placeholderTextColor={colors.mutedForeground}
+          selectionColor={colors.primary}
+          multiline={multiline}
+          style={[
+            styles.input,
+            { backgroundColor: colors.card, borderColor: error ? colors.destructive : colors.input, color: colors.foreground, paddingRight: rightAccessory ? 48 : 13 },
+            multiline && styles.multiline,
+          ]}
+          {...inputProps}
+        />
+        {rightAccessory ? <View style={styles.inputAccessory}>{rightAccessory}</View> : null}
+      </View>
       {error ? <Text style={[styles.error, { color: colors.destructive }]}>{error}</Text> : null}
     </View>
   );
@@ -335,6 +339,8 @@ const styles = StyleSheet.create({
   badge: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
   badgeText: { fontSize: 10, lineHeight: 14, fontFamily: 'Inter_600SemiBold' },
   fieldWrap: { minWidth: 0, gap: 7 },
+  inputWrap: { position: 'relative', minWidth: 0 },
+  inputAccessory: { position: 'absolute', top: 0, right: 8, bottom: 0, justifyContent: 'center' },
   fieldLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   input: { minHeight: 48, borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 12, fontSize: 15, fontFamily: 'Inter_400Regular' },
   multiline: { minHeight: 96, textAlignVertical: 'top' },
