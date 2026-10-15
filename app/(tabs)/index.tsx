@@ -1,17 +1,45 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Badge, Body, Button, Card, Row, Screen, SectionTitle, Spacer } from '@/components/shopflow/ui';
 import { formatDate, formatMoney, transactionStatusTone, transactionTypeName } from '@/components/shopflow/format';
 import { getCashBalance, getWalletBalance, operators, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
+import { BackendAccount, shopflowApi } from '@/services/shopflowApi';
 
 export default function DashboardScreen() {
   const { data, isReady, storageIssue } = useShopFlow();
   const colors = useColors();
   const { session } = useAuth();
+  const [remoteAccounts, setRemoteAccounts] = useState<Array<BackendAccount & { balance: number; currency: string }> | null>(null);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!session) {
+      setRemoteAccounts(null);
+      setRemoteError(null);
+      return;
+    }
+    let active = true;
+    shopflowApi.listAccounts(session.access_token)
+      .then(async (accounts) => {
+        const balances = await Promise.all(accounts.map(async (account) => ({
+          account,
+          balance: await shopflowApi.getBalance(account.id, session.access_token),
+        })));
+        if (!active) return;
+        setRemoteAccounts(balances.map(({ account, balance }) => ({ ...account, balance: balance.theoretical_balance_cents, currency: balance.currency })));
+        setRemoteError(null);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setRemoteAccounts(null);
+        setRemoteError(error instanceof Error ? error.message : 'Soldes serveur indisponibles.');
+      });
+    return () => { active = false; };
+  }, [session?.access_token]);
   const totalOpen = data.anomalies.filter((anomaly) => anomaly.status !== 'resolved').length;
   const pending = data.transactions.filter((transaction) => transaction.status === 'pending').length;
   const confirmedToday = data.transactions.filter(
@@ -28,10 +56,12 @@ export default function DashboardScreen() {
   const discrepancyOperator = balanceDiscrepancy?.operator;
   const discrepancyCalculated = discrepancyOperator ? getWalletBalance(data, discrepancyOperator) : 0;
   const discrepancyReported = Math.max(0, discrepancyCalculated - (balanceDiscrepancy?.amountCents ?? 0));
+  const serverElectronicTotal = remoteAccounts?.reduce((sum, account) => sum + account.balance, 0) ?? 0;
+  const electronicTotal = remoteAccounts ? serverElectronicTotal : operators.reduce((sum, operator) => sum + getWalletBalance(data, operator), 0);
 
   return (
     <Screen
-      title="Bonjour, Aline"
+      title={`Bonjour, ${session?.full_name?.split(' ')[0] || 'à toi'}`}
       subtitle={data.settings.shopName}
       right={
         <Pressable
@@ -49,16 +79,18 @@ export default function DashboardScreen() {
           <Text style={{ color: colors.heroMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>SOLDE ÉLECTRONIQUE THÉORIQUE</Text>
         </Row>
         <Text style={{ color: colors.primaryForeground, fontSize: 35, lineHeight: 42, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] }}>
-          {formatMoney(operators.reduce((sum, operator) => sum + getWalletBalance(data, operator), 0), data.settings.currency)}
+          {formatMoney(electronicTotal, remoteAccounts?.[0]?.currency ?? data.settings.currency)}
         </Text>
         <Text style={{ color: colors.heroMuted, fontSize: 12, fontFamily: 'Inter_400Regular' }}>
-          {session ? 'Calcul local hors ligne · les écritures serveur restent consultables dans le journal' : 'Calculé à partir des opérations locales confirmées · jamais un solde opérateur en temps réel'}
+          {remoteAccounts ? 'Calculé à partir des comptes et mouvements confirmés du serveur' : session ? 'Backend indisponible · calcul local temporaire, à vérifier à la reconnexion' : 'Calculé à partir des opérations locales confirmées · jamais un solde opérateur en temps réel'}
         </Text>
         <Row style={{ justifyContent: 'space-between', marginTop: 3 }}>
           <Text style={{ color: colors.primaryForeground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Référence la plus récente</Text>
           <Text style={{ color: colors.heroMuted, fontSize: 12, fontFamily: 'Inter_500Medium' }}>{latestReferenceAt ? formatDate(latestReferenceAt) : '—'}</Text>
         </Row>
       </Card>
+
+      {remoteError ? <Card style={{ backgroundColor: colors.warningSurface, borderColor: colors.warningSurface }}><Text style={{ color: colors.warning, fontSize: 12, lineHeight: 17, fontFamily: 'Inter_500Medium' }}>{remoteError} Les valeurs locales restent provisoires.</Text></Card> : null}
 
       <Row>
         <Card style={{ flex: 1 }}>
@@ -95,7 +127,7 @@ export default function DashboardScreen() {
         </Card>
       ) : null}
 
-      {balanceDiscrepancy && balanceDiscrepancy.status !== 'resolved' ? (
+      {!session && balanceDiscrepancy && balanceDiscrepancy.status !== 'resolved' ? (
       <Card style={{ backgroundColor: colors.warningSurface, borderColor: colors.warningSurface }}>
         <Row style={{ alignItems: 'flex-start' }}>
           <Feather name="alert-triangle" size={18} color={colors.warning} />
@@ -115,7 +147,20 @@ export default function DashboardScreen() {
       ) : null}
 
       <SectionTitle title="Comptes opérationnels" action="Détails" onAction={() => router.push('/reports')} />
-      {operators.map((operator) => (
+      {remoteAccounts ? remoteAccounts.map((account) => (
+        <Card key={account.id} onPress={() => router.push('/ledger')}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: 'Inter_600SemiBold' }}>{account.label}</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>{account.operator} · solde théorique serveur</Text>
+            </View>
+            <Text style={{ color: account.balance >= 0 ? colors.success : colors.destructive, fontSize: 16, fontFamily: 'Inter_700Bold' }}>
+              {formatMoney(account.balance, account.currency)}
+            </Text>
+            <Feather name="chevron-right" size={17} color={colors.mutedForeground} />
+          </Row>
+        </Card>
+      )) : operators.map((operator) => (
         <Card key={operator} onPress={() => router.push('/reports')}>
           <Row style={{ justifyContent: 'space-between' }}>
             <View style={{ flex: 1, gap: 4 }}>
@@ -167,7 +212,7 @@ export default function DashboardScreen() {
         <Row>
           <Feather name="smartphone" size={18} color={colors.primary} />
           <View style={{ flex: 1, gap: 4 }}>
-            <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>{session ? 'Mode connecté + hors ligne' : 'Données locales uniquement'}</Text>
+            <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>{remoteAccounts ? 'Données serveur + mode hors ligne' : session ? 'Session connectée · repli local' : 'Données locales uniquement'}</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
               {session ? 'Les SMS importés restent contrôlés et synchronisables ; aucune lecture automatique non autorisée.' : 'Pas de serveur, de synchronisation ni de lecture automatique des SMS. Les exemples sont fictifs.'}
             </Text>

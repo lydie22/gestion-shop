@@ -1,5 +1,5 @@
 import { Feather } from '@expo/vector-icons';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { Badge, Button, Card, ChoiceChip, Field, Row, Screen, SectionTitle, Spacer } from '@/components/shopflow/ui';
 import { formatDate, formatMoney } from '@/components/shopflow/format';
@@ -7,6 +7,8 @@ import { CashMovement, getCashBalance, useShopFlow } from '@/context/ShopFlowCon
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
 import { shopflowApi } from '@/services/shopflowApi';
+import { enqueueCashMovement, readPendingCashMovements, removePendingCashMovement } from '@/services/cashSyncQueue';
+import { createIdempotencyKey } from '@/services/idempotency';
 
 type CashForm = 'open' | 'close' | 'movement' | null;
 type MovementCategory = CashMovement['category'];
@@ -23,22 +25,60 @@ export default function CashScreen() {
   const [pending, setPending] = useState(false);
   const [serverBalance, setServerBalance] = useState<number | null>(null);
   const [serverOpenSessionId, setServerOpenSessionId] = useState<string | null>(null);
+  const [serverMovements, setServerMovements] = useState<Array<{ id: string; category: string; amount_cents: number; delta_cents: number; note: string; status: string; created_by: string; created_at: string }>>([]);
   const [serverError, setServerError] = useState<string | null>(null);
   useEffect(() => {
     if (!session) {
       setServerBalance(null);
       setServerOpenSessionId(null);
+      setServerMovements([]);
       return;
     }
-    Promise.all([shopflowApi.getCashBalance(session.access_token), shopflowApi.getCashSessions(session.access_token)])
-      .then(([cash, sessions]) => {
+    Promise.all([shopflowApi.getCashBalance(session.access_token), shopflowApi.getCashSessions(session.access_token), shopflowApi.getCashMovements(session.access_token)])
+      .then(([cash, sessions, movements]) => {
         setServerBalance(cash.theoretical_balance_cents);
-        setServerOpenSessionId(sessions.find((item) => item.status === 'open')?.id ?? null);
+        setServerMovements(movements);
+        const ownSession = sessions.find((item) => item.status === 'open' && item.opened_by === session.user_id);
+        const visibleSession = ownSession ?? (['owner', 'supervisor'].includes(session.role) ? sessions.find((item) => item.status === 'open') : undefined);
+        setServerOpenSessionId(visibleSession?.id ?? null);
         setServerError(null);
       })
       .catch((error: unknown) => setServerError(error instanceof Error ? error.message : 'Caisse serveur indisponible.'));
   }, [session?.access_token]);
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    readPendingCashMovements(session.shop_id).then(async (pendingMovements) => {
+      let remaining = 0;
+      for (const movement of pendingMovements) {
+        try {
+          await shopflowApi.createCashMovement(movement, session.access_token);
+          await removePendingCashMovement(session.shop_id, movement.idempotency_key);
+        } catch {
+          remaining += 1;
+        }
+      }
+      if (!cancelled && remaining > 0) setServerError(`${remaining} mouvement(s) de caisse restent en attente de synchronisation.`);
+    });
+    return () => { cancelled = true; };
+  }, [session?.access_token]);
   const balance = getCashBalance(data);
+  const visibleMovements = useMemo(() => {
+    const serverIds = new Set(serverMovements.map((item) => item.id));
+    const local = data.cashMovements.filter((item) => !item.serverId || !serverIds.has(item.serverId));
+    const remote = serverMovements.map((item) => ({
+      id: `server-${item.id}`,
+      serverId: item.id,
+      category: item.category as CashMovement['category'],
+      amountCents: item.amount_cents,
+      deltaCents: item.delta_cents,
+      note: item.note,
+      status: item.status as CashMovement['status'],
+      createdAt: item.created_at,
+      agent: item.created_by === session?.user_id ? 'Moi' : 'Autre agent',
+    }));
+    return [...remote, ...local].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [data.cashMovements, serverMovements, session?.user_id]);
   const currentSession = data.cashSessions.find((session) => session.status === 'open');
   const latestClosed = data.cashSessions.find((session) => session.status === 'closed');
 
@@ -91,15 +131,22 @@ export default function CashScreen() {
         Alert.alert('Motif requis', 'Ajoute un motif pour conserver une trace du mouvement.');
         return;
       }
+      const requestedStatus: 'pending' | 'confirmed' = pending || category === 'other' ? 'pending' : 'confirmed';
+      let localStatus: 'pending' | 'confirmed' = requestedStatus;
+      let serverMovementId: string | undefined;
       if (session) {
+        const idempotencyKey = createIdempotencyKey('cash');
         try {
-          const result = await shopflowApi.createCashMovement({ category, amount_cents: cents, note: note.trim(), idempotency_key: `cash-${Date.now()}-${category}-${cents}` }, session.access_token);
+          const result = await shopflowApi.createCashMovement({ category, amount_cents: cents, note: note.trim(), status: requestedStatus, idempotency_key: idempotencyKey }, session.access_token);
+          serverMovementId = result.id;
+          localStatus = result.status === 'pending' ? 'pending' : 'confirmed';
           setServerError(result.status === 'pending' ? 'Mouvement transmis en attente de revue serveur.' : null);
           const updated = await shopflowApi.getCashBalance(session.access_token);
           setServerBalance(updated.theoretical_balance_cents);
         } catch (error: unknown) {
-          Alert.alert('Mouvement serveur refusé', error instanceof Error ? error.message : 'Impossible d’enregistrer le mouvement côté serveur.');
-          return;
+          await enqueueCashMovement(session.shop_id, { category, amount_cents: cents, note: note.trim(), status: requestedStatus, idempotency_key: idempotencyKey });
+          localStatus = 'pending';
+          setServerError(`${error instanceof Error ? error.message : 'Réseau indisponible.'} Mouvement conservé pour reprise ultérieure.`);
         }
       }
       const sign = category === 'owner_in' ? 1 : category === 'owner_out' || category === 'expense' ? -1 : 0;
@@ -108,7 +155,8 @@ export default function CashScreen() {
         amountCents: cents,
         deltaCents: sign * cents,
         note: note.trim(),
-        status: pending || category === 'other' ? 'pending' : 'confirmed',
+        status: localStatus,
+        ...(serverMovementId ? { serverId: serverMovementId } : {}),
       });
     }
     setForm(null);
@@ -199,7 +247,7 @@ export default function CashScreen() {
       ) : null}
 
       <SectionTitle title="Mouvements récents" />
-      {data.cashMovements.slice(0, 6).map((movement) => (
+      {visibleMovements.slice(0, 6).map((movement) => (
         <Card key={movement.id}>
           <Row>
             <Feather name={movement.deltaCents < 0 ? 'arrow-down-right' : movement.deltaCents > 0 ? 'arrow-up-right' : 'repeat'} size={18} color={movement.deltaCents < 0 ? colors.destructive : colors.primary} />
@@ -214,7 +262,7 @@ export default function CashScreen() {
               </Badge>
             </View>
           </Row>
-          {movement.status === 'pending' ? (
+          {movement.status === 'pending' && (!session || ['owner', 'supervisor'].includes(session.role)) ? (
             <>
               <Field
                 label="Note de revue obligatoire"
@@ -224,22 +272,48 @@ export default function CashScreen() {
               />
               <Row>
                 <View style={{ flex: 1 }}>
-                  <Button title="Valider localement" icon="check" variant="secondary" onPress={() => {
+                  <Button title="Valider" icon="check" variant="secondary" onPress={async () => {
                     const review = reviewNotes[movement.id] ?? '';
                     if (review.trim().length < 4) {
                       Alert.alert('Note requise', 'Ajoute une courte note de vérification.');
                       return;
+                    }
+                    if (session) {
+                      if (!movement.serverId) {
+                        Alert.alert('Synchronisation requise', 'Ce mouvement local doit d’abord être synchronisé avant validation.');
+                        return;
+                      }
+                      try {
+                        await shopflowApi.reviewCashMovement(movement.serverId, 'confirmed', review, session.access_token);
+                        setServerMovements((current) => current.map((item) => item.id === movement.serverId ? { ...item, status: 'confirmed', note: `${item.note} · Validation : ${review.trim()}` } : item));
+                      } catch (error: unknown) {
+                        Alert.alert('Validation refusée', error instanceof Error ? error.message : 'Le serveur a refusé la validation.');
+                        return;
+                      }
                     }
                     reviewCashMovement(movement.id, 'confirmed', review);
                     setReviewNotes((current) => ({ ...current, [movement.id]: '' }));
                   }} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Button title="Rejeter" icon="x" variant="danger" onPress={() => {
+                  <Button title="Rejeter" icon="x" variant="danger" onPress={async () => {
                     const review = reviewNotes[movement.id] ?? '';
                     if (review.trim().length < 4) {
                       Alert.alert('Motif requis', 'Ajoute la raison du rejet.');
                       return;
+                    }
+                    if (session) {
+                      if (!movement.serverId) {
+                        Alert.alert('Synchronisation requise', 'Ce mouvement local doit d’abord être synchronisé avant rejet.');
+                        return;
+                      }
+                      try {
+                        await shopflowApi.reviewCashMovement(movement.serverId, 'rejected', review, session.access_token);
+                        setServerMovements((current) => current.map((item) => item.id === movement.serverId ? { ...item, status: 'rejected', note: `${item.note} · Rejet : ${review.trim()}` } : item));
+                      } catch (error: unknown) {
+                        Alert.alert('Rejet refusé', error instanceof Error ? error.message : 'Le serveur a refusé le rejet.');
+                        return;
+                      }
                     }
                     reviewCashMovement(movement.id, 'rejected', review);
                     setReviewNotes((current) => ({ ...current, [movement.id]: '' }));

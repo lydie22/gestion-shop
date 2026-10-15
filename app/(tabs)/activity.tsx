@@ -1,11 +1,13 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Badge, Card, ChoiceChip, Field, IconButton, Row, Screen, SectionTitle, Spacer } from '@/components/shopflow/ui';
 import { formatDate, formatMoney, statusName, transactionStatusTone, transactionTypeName } from '@/components/shopflow/format';
-import { TransactionStatus, useShopFlow } from '@/context/ShopFlowContext';
+import { Transaction, TransactionStatus, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/context/AuthContext';
+import { BackendTransaction, shopflowApi } from '@/services/shopflowApi';
 
 const filters = [
   { label: 'Tout', value: 'all' },
@@ -16,23 +18,69 @@ const filters = [
 
 export default function ActivityScreen() {
   const { data } = useShopFlow();
+  const { session } = useAuth();
   const colors = useColors();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<(typeof filters)[number]['value']>('all');
+  const [remoteTransactions, setRemoteTransactions] = useState<Transaction[] | null>(null);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!session) {
+      setRemoteTransactions(null);
+      setRemoteError(null);
+      return;
+    }
+    let active = true;
+    Promise.all([
+      shopflowApi.listTransactions(session.access_token),
+      shopflowApi.listAccounts(session.access_token),
+      shopflowApi.listAgents(session.access_token),
+    ]).then(([rows, accounts, agents]) => {
+      if (!active) return;
+      const accountNames = new Map(accounts.map((account) => [account.id, account.operator as Transaction['operator']]));
+      const agentNames = new Map(agents.map((agent) => [agent.id, agent.name]));
+      setRemoteTransactions(rows.map((row: BackendTransaction) => ({
+        id: row.id,
+        reference: row.reference,
+        operator: accountNames.get(row.account_id) ?? 'Airtel Money',
+        type: (row.operation_type as Transaction['type']) || 'adjustment',
+        amountCents: row.amount_cents,
+        feeCents: row.fee_cents,
+        commissionCents: row.commission_expected_cents,
+        electronicDeltaCents: 0,
+        cashDeltaCents: 0,
+        status: (row.status as Transaction['status']) || 'pending',
+        matchStatus: (row.reconciliation_status as Transaction['matchStatus']) || 'unmatched',
+        agent: row.agent_id ? (agentNames.get(row.agent_id) ?? 'Agent') : 'Non attribué',
+        note: row.note ?? 'Transaction synchronisée depuis le backend.',
+        source: 'manual',
+        createdAt: row.created_at,
+      })));
+      setRemoteError(null);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setRemoteTransactions(null);
+      setRemoteError(error instanceof Error ? error.message : 'Transactions serveur indisponibles.');
+    });
+    return () => { active = false; };
+  }, [session?.access_token]);
+
+  const transactions = remoteTransactions ?? data.transactions;
   const visibleTransactions = useMemo(
     () =>
-      data.transactions.filter((transaction) => {
+      transactions.filter((transaction) => {
         const matchesFilter = filter === 'all' || transaction.status === (filter as TransactionStatus);
         const searchable = `${transaction.reference} ${transaction.operator} ${transaction.agent} ${transactionTypeName(transaction)}`.toLocaleLowerCase();
         return matchesFilter && searchable.includes(query.trim().toLocaleLowerCase());
       }),
-    [data.transactions, filter, query],
+    [transactions, filter, query],
   );
 
   return (
     <Screen
       title="Opérations"
-      subtitle={`${data.transactions.length} entrée${data.transactions.length === 1 ? '' : 's'} dans le journal local`}
+      subtitle={`${transactions.length} entrée${transactions.length === 1 ? '' : 's'} dans le journal ${session ? 'serveur' : 'local'}`}
       right={<IconButton icon="plus" label="Nouvelle opération" onPress={() => router.push('/transactions/new')} />}
     >
       <Card style={{ backgroundColor: colors.infoSurface, borderColor: colors.infoSurface }}>
@@ -43,6 +91,7 @@ export default function ActivityScreen() {
           </Text>
         </Row>
       </Card>
+      {remoteError ? <Card style={{ backgroundColor: colors.warningSurface, borderColor: colors.warningSurface }}><Text style={{ color: colors.warning, fontSize: 12, lineHeight: 17, fontFamily: 'Inter_500Medium' }}>{remoteError} Affichage local temporaire.</Text></Card> : null}
       <Field
         label="Rechercher"
         placeholder="Référence, opérateur, agent…"

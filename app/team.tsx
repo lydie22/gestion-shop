@@ -1,4 +1,5 @@
 import { Feather } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { Badge, Button, Card, ChoiceChip, Field, Row, Screen, SectionTitle } from '@/components/shopflow/ui';
@@ -101,6 +102,22 @@ export default function TeamScreen() {
     setAdding(false);
   }
 
+  if (session?.role === 'agent') {
+    return (
+      <Screen title="Agents & rôles" subtitle="Accès réservé aux responsables" back>
+        <Card style={{ backgroundColor: colors.warningSurface, borderColor: colors.warningSurface }}>
+          <Row style={{ alignItems: 'flex-start' }}>
+            <Feather name="lock" size={17} color={colors.warning} />
+            <Text style={{ flex: 1, color: colors.inkSoft, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_500Medium' }}>
+              La gestion des membres, des rôles et des affectations de comptes est réservée au propriétaire et au superviseur.
+            </Text>
+          </Row>
+        </Card>
+        <Button title="Retour" icon="arrow-left" variant="secondary" onPress={() => router.back()} />
+      </Screen>
+    );
+  }
+
   return (
       <Screen title="Agents & rôles" subtitle={session ? `Gestion sécurisée · rôle ${session.role}` : 'Profils indicatifs conservés sur l’appareil'} back>
       <Card style={{ backgroundColor: colors.warningSurface, borderColor: colors.warningSurface }}>
@@ -139,7 +156,7 @@ export default function TeamScreen() {
           </Row>
         </Card>
       ))}
-      {session && session.role !== 'agent' ? (
+      {session ? (
         <>
           <SectionTitle title={`Membres connectés (${members.length})`} action={session.role === 'owner' ? (remoteAdding ? 'Fermer' : 'Ajouter') : undefined} onAction={session.role === 'owner' ? () => setRemoteAdding(!remoteAdding) : undefined} />
           {remoteAdding ? (

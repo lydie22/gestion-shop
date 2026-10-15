@@ -9,7 +9,7 @@ import { csvCell, formatDate, formatMoney, transactionTypeName } from '@/compone
 import { CashMovement, getCashBalance, getWalletBalance, operators, Transaction, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
-import { CommissionSummary, shopflowApi } from '@/services/shopflowApi';
+import { CommissionSummary, DailyReport, shopflowApi } from '@/services/shopflowApi';
 
 const localDayKey = (date: string) => {
   const parsed = new Date(date);
@@ -53,6 +53,8 @@ export default function ReportsScreen() {
   const [day, setDay] = useState(todayKey());
   const [serverCommissions, setServerCommissions] = useState<CommissionSummary | null>(null);
   const [serverCommissionError, setServerCommissionError] = useState<string | null>(null);
+  const [serverDaily, setServerDaily] = useState<DailyReport | null>(null);
+  const [serverDailyError, setServerDailyError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -71,6 +73,20 @@ export default function ReportsScreen() {
       });
     return () => { active = false; };
   }, [session?.access_token]);
+
+  useEffect(() => {
+    if (!session || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      setServerDaily(null);
+      setServerDailyError(null);
+      return;
+    }
+    let active = true;
+    setServerDailyError(null);
+    shopflowApi.getDailyReport(day, session.access_token)
+      .then((report) => { if (active) setServerDaily(report); })
+      .catch((error: unknown) => { if (active) setServerDailyError(error instanceof Error ? error.message : 'Rapport serveur indisponible.'); });
+    return () => { active = false; };
+  }, [day, session?.access_token]);
 
   const serverExpectedCents = serverCommissions?.calculations.reduce((sum, item) => sum + item.expected_cents, 0) ?? 0;
   const serverReceivedCents = serverCommissions?.receipts.reduce((sum, item) => sum + item.amount_cents, 0) ?? 0;
@@ -531,6 +547,28 @@ export default function ReportsScreen() {
               </Row>
             </>
           )}
+        </Card>
+      ) : null}
+      {session ? (
+        <Card>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <View style={{ gap: 4 }}>
+              <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Synthèse serveur · {day}</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>Données filtrées côté API selon la boutique et le rôle connecté</Text>
+            </View>
+            <Badge tone={serverDailyError ? 'warning' : 'info'}>{serverDailyError ? 'Indisponible' : 'Synchronisé'}</Badge>
+          </Row>
+          {serverDailyError ? <Text style={{ color: colors.warning, fontSize: 11 }}>{serverDailyError}</Text> : serverDaily ? (
+            <>
+              <Row style={{ justifyContent: 'space-between' }}><Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Transactions confirmées</Text><Text style={{ color: colors.foreground, fontFamily: 'Inter_700Bold' }}>{serverDaily.transactions.confirmed}</Text></Row>
+              <Row style={{ justifyContent: 'space-between' }}><Text style={{ color: colors.mutedForeground, fontSize: 12 }}>SMS à vérifier</Text><Text style={{ color: serverDaily.sms.review ? colors.warning : colors.success, fontFamily: 'Inter_700Bold' }}>{serverDaily.sms.review}</Text></Row>
+              <Row style={{ justifyContent: 'space-between' }}><Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Anomalies ouvertes créées ce jour</Text><Text style={{ color: serverDaily.anomalies.open ? colors.warning : colors.success, fontFamily: 'Inter_700Bold' }}>{serverDaily.anomalies.open}</Text></Row>
+              <Text style={{ color: colors.foreground, fontSize: 12, marginTop: 8, fontFamily: 'Inter_600SemiBold' }}>Répartition serveur par opérateur</Text>
+              {serverDaily.by_operator.map((row) => <Row key={row.operator} style={{ justifyContent: 'space-between' }}><Text style={{ color: colors.mutedForeground, fontSize: 11 }}>{row.operator} · {row.confirmed_count}/{row.transaction_count} confirmées</Text><Text style={{ color: colors.foreground, fontSize: 11, fontFamily: 'Inter_600SemiBold' }}>{formatMoney(row.amount_cents, data.settings.currency)}</Text></Row>)}
+              <Text style={{ color: colors.foreground, fontSize: 12, marginTop: 8, fontFamily: 'Inter_600SemiBold' }}>Répartition serveur par agent</Text>
+              {serverDaily.by_agent.map((row) => <Row key={row.agent_id ?? 'unassigned'} style={{ justifyContent: 'space-between' }}><Text style={{ color: colors.mutedForeground, fontSize: 11 }}>{row.agent_name} · {row.confirmed_count}/{row.transaction_count} confirmées</Text><Text style={{ color: colors.foreground, fontSize: 11, fontFamily: 'Inter_600SemiBold' }}>{formatMoney(row.amount_cents, data.settings.currency)}</Text></Row>)}
+            </>
+          ) : null}
         </Card>
       ) : null}
       <SectionTitle title="Qualité des données" />

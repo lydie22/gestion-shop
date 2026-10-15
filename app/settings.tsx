@@ -11,7 +11,7 @@ import { getLocalDeviceKey } from '@/services/deviceIdentity';
 export default function SettingsScreen() {
   const { data, updateSettings, updateReferenceBalances, resetDemo } = useShopFlow();
   const colors = useColors();
-  const { session } = useAuth();
+  const { session, accessibleShops, switchShop } = useAuth();
   const [shopName, setShopName] = useState(data.settings.shopName);
   const [currency, setCurrency] = useState(data.settings.currency);
   const [threshold, setThreshold] = useState((data.settings.discrepancyThresholdCents / 100).toFixed(2));
@@ -27,6 +27,7 @@ export default function SettingsScreen() {
   const [deviceStatus, setDeviceStatus] = useState<string | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
   const [subscriptionPlan, setSubscriptionPlan] = useState<SubscriptionSummary['plan']>('pilot');
+  const [switchingShop, setSwitchingShop] = useState(false);
 
   useEffect(() => {
     getLocalDeviceKey().then(setDeviceKey).catch(() => setDeviceStatus('Identifiant local indisponible'));
@@ -59,6 +60,20 @@ export default function SettingsScreen() {
       setDeviceStatus(result.status === 'active' ? 'Appareil autorisé pour cette boutique.' : result.status);
     } catch (cause) {
       setDeviceStatus(cause instanceof Error ? cause.message : 'Association impossible.');
+    }
+  }
+
+  async function changeShop(shopId: string) {
+    if (!session || shopId === session.shop_id || switchingShop) return;
+    setSwitchingShop(true);
+    try {
+      await switchShop(shopId);
+      const selected = accessibleShops.find((shop) => shop.id === shopId);
+      Alert.alert('Boutique changée', `${selected?.name ?? 'La boutique'} est maintenant active.`);
+    } catch (cause) {
+      Alert.alert('Changement impossible', cause instanceof Error ? cause.message : 'La boutique n’a pas pu être sélectionnée.');
+    } finally {
+      setSwitchingShop(false);
     }
   }
 
@@ -135,6 +150,20 @@ export default function SettingsScreen() {
                 <Button title="Enregistrer le plan SaaS" icon="save" variant="secondary" onPress={() => void saveSubscription()} />
               </>
             ) : null}
+          </Card>
+        </>
+      ) : null}
+      {session && accessibleShops.length > 1 ? (
+        <>
+          <SectionTitle title="Boutique active" />
+          <Card>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
+              Le changement remplace le contexte serveur, le rôle et les permissions de la session.
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {accessibleShops.map((shop) => <ChoiceChip key={shop.id} label={`${shop.name} · ${shop.role}`} selected={shop.id === session.shop_id} onPress={() => void changeShop(shop.id)} />)}
+            </View>
+            {switchingShop ? <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>Changement en cours…</Text> : null}
           </Card>
         </>
       ) : null}

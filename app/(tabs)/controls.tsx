@@ -52,6 +52,18 @@ export default function ControlsScreen() {
       setServerError(error instanceof Error ? error.message : 'Résolution serveur impossible.');
     }
   }
+  async function reviewServerAnomaly(anomaly: BackendAnomaly) {
+    if (!session || !['owner', 'supervisor'].includes(session.role)) return;
+    const note = serverNotes[anomaly.id]?.trim() ?? '';
+    if (note.length < 4) return;
+    try {
+      const updated = await shopflowApi.reviewAnomaly(anomaly.id, note, session.access_token);
+      setServerAnomalies((items) => items.map((item) => item.id === updated.id ? updated : item));
+      setServerNotes((items) => ({ ...items, [anomaly.id]: '' }));
+    } catch (error: unknown) {
+      setServerError(error instanceof Error ? error.message : 'Prise en charge serveur impossible.');
+    }
+  }
   const visible = useMemo(
     () => data.anomalies.filter((anomaly) => {
       const matchesStatus = filter === 'all' || anomaly.status === filter;
@@ -95,6 +107,7 @@ export default function ControlsScreen() {
               {anomaly.status !== 'resolved' && ['owner', 'supervisor'].includes(session.role) ? (
                 <>
                   <Field label="Justification de résolution" placeholder="Fait vérifié ou décision prise…" value={serverNotes[anomaly.id] ?? ''} onChangeText={(value) => setServerNotes((items) => ({ ...items, [anomaly.id]: value }))} />
+                  {anomaly.status === 'open' ? <Button title="Prendre en charge" icon="eye" variant="secondary" onPress={() => void reviewServerAnomaly(anomaly)} disabled={(serverNotes[anomaly.id] ?? '').trim().length < 4} /> : null}
                   <Button title="Résoudre côté serveur" icon="check" variant="secondary" onPress={() => void resolveServerAnomaly(anomaly)} disabled={(serverNotes[anomaly.id] ?? '').trim().length < 4} />
                 </>
               ) : null}

@@ -12,6 +12,8 @@ expo-env.d.ts
 # Native
 ios/
 android/
+!modules/shopflow-sms/android/
+!modules/shopflow-sms/android/**
 *.orig.*
 *.jks
 *.p8

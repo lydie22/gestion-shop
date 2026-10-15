@@ -14,7 +14,8 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#F4F7F4"
-      }
+      },
+      "package": "com.believer834.shopflowmobile"
     },
     "splash": {
       "image": "./assets/images/icon.png",
@@ -28,7 +29,8 @@
     "plugins": [
       "expo-router",
       "expo-sharing",
-      "./plugins/withShopflowSms"
+      "./plugins/withShopflowSms",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

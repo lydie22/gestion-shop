@@ -7,18 +7,26 @@ import { Operator, operators, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
 import { shopflowApi } from '@/services/shopflowApi';
-import { getLocalDeviceKey } from '@/services/deviceIdentity';
-import { configureNativeSms, drainNativeSms, isNativeSmsAvailable } from '../modules/shopflow-sms/src';
+import { flushPendingSmsEvents, readPendingSmsEvents } from '@/services/smsSyncQueue';
+import { clearNativeSmsQueue, configureNativeSms, drainNativeSms, isNativeSmsAvailable } from '../modules/shopflow-sms/src';
 
 const sampleText = 'Transaction réussie. Montant : 50 USD Référence : AT-84921 Nouveau solde : 350 USD';
 
 export default function SmsScreen() {
-  const { data, addSmsText } = useShopFlow();
+  const { data, addSmsText, isReady } = useShopFlow();
   const { session } = useAuth();
   const colors = useColors();
   const [text, setText] = useState('');
   const [operator, setOperator] = useState<Operator>(operators[0]);
   const [serverReconciliations, setServerReconciliations] = useState<Array<{ status: string; reason: string }>>([]);
+
+  useEffect(() => {
+    if (!isReady || Platform.OS !== 'android' || !isNativeSmsAvailable) return;
+    const pending = drainNativeSms();
+    if (pending.length === 0) return;
+    for (const message of pending) addSmsText(message.body, 'Airtel Money', { sender: message.sender, receivedAt: new Date(message.received_at).toISOString() });
+    clearNativeSmsQueue();
+  }, [addSmsText, isReady]);
 
   useEffect(() => {
     if (!session) {
@@ -47,18 +55,9 @@ export default function SmsScreen() {
   async function syncEvents() {
     if (!session || data.smsEvents.length === 0) return;
     try {
-      const deviceKey = await getLocalDeviceKey();
-      const result = await shopflowApi.syncSmsBatch(
-        data.smsEvents.map((event) => ({
-          operator: event.operator ?? 'Opérateur inconnu',
-          raw_text: event.rawText,
-          device_id: deviceKey,
-          received_at: event.receivedAt,
-          idempotency_key: `local-sms-${event.id}`,
-        })),
-        session.access_token,
-      );
-      Alert.alert('Synchronisation terminée', `${result.length} événement(s) envoyé(s). Les SMS restent des événements sources et ne créent pas automatiquement de mouvement confirmé.`);
+      const remainingBefore = (await readPendingSmsEvents(session.shop_id)).length;
+      const remaining = await flushPendingSmsEvents(session.shop_id, session.access_token);
+      Alert.alert('Synchronisation terminée', `${Math.max(0, remainingBefore - remaining)} événement(s) envoyé(s), ${remaining} restant(s). Les SMS restent des événements sources et ne créent pas automatiquement de mouvement confirmé.`);
     } catch (cause) {
       Alert.alert('Synchronisation impossible', cause instanceof Error ? cause.message : 'Vérifie la connexion au backend.');
     }
@@ -81,7 +80,8 @@ export default function SmsScreen() {
     }
     configureNativeSms(['airtel', 'airtel money']);
     const received = drainNativeSms();
-    for (const message of received) addSmsText(message.body, 'Airtel Money');
+    for (const message of received) addSmsText(message.body, 'Airtel Money', { sender: message.sender, receivedAt: new Date(message.received_at).toISOString() });
+    clearNativeSmsQueue();
     Alert.alert('Capture activée', `${received.length} message(s) en attente importé(s). Les SMS restent des événements à rapprocher, pas des confirmations automatiques.`);
   }
 
@@ -130,11 +130,15 @@ export default function SmsScreen() {
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>{event.type}</Text>
               <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>{event.operator ?? 'Opérateur inconnu'} · {formatDate(event.receivedAt)}</Text>
+          {event.sender ? <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_400Regular' }}>Expéditeur source : {event.sender}</Text> : null}
             </View>
             <Badge tone={event.confidence === 'high' ? 'success' : 'warning'}>{event.confidence === 'high' ? 'Champs extraits' : 'Inconnu'}</Badge>
           </Row>
           {event.reference ? <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Référence : {event.reference}</Text> : null}
           {event.amountCents !== undefined ? <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Montant détecté : {formatMoney(event.amountCents, data.settings.currency)}</Text> : null}
+          {event.messageStatus && event.messageStatus !== 'unknown' ? <Text style={{ color: event.messageStatus === 'confirmed' ? colors.success : colors.warning, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>Statut annoncé : {event.messageStatus === 'confirmed' ? 'réussi' : event.messageStatus === 'failed' ? 'échec' : 'inversé'}</Text> : null}
+          {event.feeCents !== undefined ? <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Frais détectés : {formatMoney(event.feeCents, data.settings.currency)}</Text> : null}
+          {event.commissionCents !== undefined ? <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Commission détectée : {formatMoney(event.commissionCents, data.settings.currency)}</Text> : null}
           {event.balanceCents !== undefined ? <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_500Medium' }}>Solde annoncé : {formatMoney(event.balanceCents, data.settings.currency)}</Text> : null}
           <Text style={{ color: colors.inkSoft, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>{event.reconciliation}</Text>
           <View style={{ padding: 10, borderRadius: 12, backgroundColor: colors.muted }}>

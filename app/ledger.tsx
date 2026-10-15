@@ -7,7 +7,7 @@ import { Badge, Card, ChoiceChip, Row, Screen, SectionTitle } from '@/components
 import { getCashBalance, getWalletBalance, operators, Operator, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
-import { shopflowApi } from '@/services/shopflowApi';
+import { BackendAccount, shopflowApi } from '@/services/shopflowApi';
 
 type LedgerAccount = Operator | 'Caisse';
 type LedgerRow = {
@@ -28,19 +28,49 @@ export default function LedgerScreen() {
   const { session } = useAuth();
   const [serverLedger, setServerLedger] = useState<Array<{ id: string; reference: string; balanced: boolean; debit_cents: number; credit_cents: number }>>([]);
   const [serverCash, setServerCash] = useState<number | null>(null);
+  const [backendAccounts, setBackendAccounts] = useState<BackendAccount[]>([]);
+  const [selectedBackendAccountId, setSelectedBackendAccountId] = useState<string | null>(null);
+  const [serverAccountBalance, setServerAccountBalance] = useState<{ theoretical_balance_cents: number; last_observed_balance_cents?: number; last_observed_at?: string; last_observed_age_seconds?: number } | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [account, setAccount] = useState<LedgerAccount>(operators[0]);
 
   useEffect(() => {
     if (!session) return;
-    Promise.all([shopflowApi.getLedger(session.access_token), shopflowApi.getCashBalance(session.access_token)])
-      .then(([ledger, cashBalance]) => {
+    Promise.all([shopflowApi.getLedger(session.access_token), shopflowApi.getCashBalance(session.access_token), shopflowApi.listAccounts(session.access_token)])
+      .then(([ledger, cashBalance, accounts]) => {
         setServerLedger(ledger);
         setServerCash(cashBalance.theoretical_balance_cents);
+        setBackendAccounts(accounts);
+        setSelectedBackendAccountId((current) => {
+          const active = accounts.filter((item) => item.active && item.operator === account);
+          return current && active.some((item) => item.id === current) ? current : active[0]?.id ?? null;
+        });
         setServerError(null);
       })
       .catch((cause) => setServerError(cause instanceof Error ? cause.message : 'Journal serveur indisponible.'));
   }, [session]);
-  const [account, setAccount] = useState<LedgerAccount>(operators[0]);
+  useEffect(() => {
+    if (account === 'Caisse') {
+      setSelectedBackendAccountId(null);
+      return;
+    }
+    const active = backendAccounts.filter((item) => item.active && item.operator === account);
+    setSelectedBackendAccountId((current) => current && active.some((item) => item.id === current) ? current : active[0]?.id ?? null);
+  }, [account, backendAccounts]);
+  useEffect(() => {
+    if (!session || account === 'Caisse') {
+      setServerAccountBalance(null);
+      return;
+    }
+    const accountId = backendAccounts.find((item) => item.id === selectedBackendAccountId && item.operator === account && item.active)?.id;
+    if (!accountId) {
+      setServerAccountBalance(null);
+      return;
+    }
+    shopflowApi.getBalance(accountId, session.access_token)
+      .then((balance) => setServerAccountBalance(balance))
+      .catch(() => setServerAccountBalance(null));
+  }, [account, backendAccounts, selectedBackendAccountId, session?.access_token]);
   const cash = account === 'Caisse';
   const anchorAt = cash ? data.referenceCashMetadata.capturedAt : data.referenceMetadata[account].capturedAt;
   const referenceCents = cash ? data.referenceCashCents : data.referenceBalances[account];
@@ -128,6 +158,11 @@ export default function LedgerScreen() {
             <Badge tone={serverError ? 'warning' : 'success'}>{serverError ? 'Hors ligne' : 'Synchronisé'}</Badge>
           </Row>
           {serverCash !== null ? <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>Caisse backend : {formatMoney(serverCash, data.settings.currency)}</Text> : null}
+          {serverAccountBalance?.last_observed_balance_cents !== undefined ? (
+            <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>
+              {account} observé : {formatMoney(serverAccountBalance.last_observed_balance_cents, data.settings.currency)} · {serverAccountBalance.last_observed_age_seconds !== undefined ? `il y a ${Math.floor(serverAccountBalance.last_observed_age_seconds / 60)} min` : 'date inconnue'}
+            </Text>
+          ) : null}
           {serverError ? <Text style={{ color: colors.warning, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>{serverError} Les données locales restent visibles.</Text> : null}
         </Card>
       ) : null}
@@ -137,6 +172,19 @@ export default function LedgerScreen() {
         ))}
         <ChoiceChip label="Caisse physique" selected={cash} onPress={() => setAccount('Caisse')} />
       </View>
+      {session && !cash ? (
+        <Card style={{ backgroundColor: colors.card, borderColor: colors.border }}>
+          <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>Compte opérationnel sélectionné</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+            {backendAccounts.filter((item) => item.active && item.operator === account).map((item) => (
+              <ChoiceChip key={item.id} label={item.label} selected={selectedBackendAccountId === item.id} onPress={() => setSelectedBackendAccountId(item.id)} />
+            ))}
+          </View>
+          {backendAccounts.filter((item) => item.active && item.operator === account).length === 0 ? (
+            <Text style={{ color: colors.warning, fontSize: 11, lineHeight: 16, marginTop: 8, fontFamily: 'Inter_400Regular' }}>Aucun compte actif n’est configuré pour cet opérateur.</Text>
+          ) : null}
+        </Card>
+      ) : null}
       <Card style={{ backgroundColor: colors.hero, borderColor: colors.hero }}>
         <Text style={{ color: colors.heroMuted, fontSize: 11, fontFamily: 'Inter_600SemiBold' }}>SOLDE THÉORIQUE LOCAL</Text>
         <Text style={{ color: colors.heroBalance, fontSize: 30, fontFamily: 'Inter_700Bold' }}>{formatMoney(theoretical, data.settings.currency)}</Text>

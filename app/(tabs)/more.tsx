@@ -21,6 +21,10 @@ export default function MoreScreen() {
   const colors = useColors();
   const { data } = useShopFlow();
   const { session, logout } = useAuth();
+  const visibleMenu = menu.filter((item) => {
+    if (!session || session.role !== 'agent') return true;
+    return item.route !== '/team' && item.route !== '/audit';
+  });
   return (
     <Screen title="Plus" subtitle={data.settings.shopName}>
       <Card style={{ backgroundColor: colors.hero, borderColor: colors.hero }}>
@@ -34,7 +38,7 @@ export default function MoreScreen() {
           </View>
         </Row>
       </Card>
-      {menu.map((item) => (
+      {visibleMenu.map((item) => (
         <Pressable key={item.route} accessibilityRole="button" onPress={() => router.push(item.route)}>
           <Card>
             <Row>

@@ -9,6 +9,7 @@ import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
 import { BackendAccount, shopflowApi } from '@/services/shopflowApi';
 import { enqueueTransaction, readPendingTransactions, removePendingTransaction } from '@/services/syncQueue';
+import { createIdempotencyKey } from '@/services/idempotency';
 
 const types: TransactionType[] = ['deposit', 'withdrawal', 'transfer_in', 'transfer_out', 'fee'];
 
@@ -22,6 +23,7 @@ export default function NewTransactionScreen() {
   const colors = useColors();
   const { session } = useAuth();
   const [backendAccounts, setBackendAccounts] = useState<BackendAccount[]>([]);
+  const [backendAccountId, setBackendAccountId] = useState<string | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [operator, setOperator] = useState<Operator>(operators[0]);
   const [type, setType] = useState<TransactionType>('deposit');
@@ -35,18 +37,28 @@ export default function NewTransactionScreen() {
 
   useEffect(() => {
     if (!session) return;
-    shopflowApi.listAccounts(session.access_token).then(setBackendAccounts).catch((cause) => setBackendError(cause instanceof Error ? cause.message : 'Comptes backend indisponibles.'));
+    shopflowApi.listAccounts(session.access_token).then((accounts) => {
+      setBackendAccounts(accounts);
+      setBackendAccountId((current) => current && accounts.some((item) => item.id === current && item.active) ? current : accounts.find((item) => item.operator === operator && item.active)?.id ?? null);
+    }).catch((cause) => setBackendError(cause instanceof Error ? cause.message : 'Comptes backend indisponibles.'));
   }, [session]);
+
+  useEffect(() => {
+    const selected = backendAccounts.find((item) => item.id === backendAccountId && item.active);
+    if (!selected || selected.operator !== operator) {
+      setBackendAccountId(backendAccounts.find((item) => item.operator === operator && item.active)?.id ?? null);
+    }
+  }, [backendAccounts, backendAccountId, operator]);
 
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
-    readPendingTransactions().then(async (pending) => {
+    readPendingTransactions(session.shop_id).then(async (pending) => {
       let remaining = 0;
       for (const item of pending) {
         try {
           await shopflowApi.createTransaction(item, session.access_token);
-          await removePendingTransaction(item.idempotency_key);
+          await removePendingTransaction(session.shop_id, item.idempotency_key);
         } catch {
           remaining += 1;
         }
@@ -78,7 +90,7 @@ export default function NewTransactionScreen() {
       Alert.alert('Référence déjà enregistrée', 'Une opération avec cette référence existe déjà pour cet opérateur. Vérifie la saisie avant de continuer.');
       return;
     }
-    const backendAccount = backendAccounts.find((item) => item.operator === operator && item.active);
+    const backendAccount = backendAccounts.find((item) => item.id === backendAccountId && item.operator === operator && item.active);
     if (session && !backendAccount) {
       Alert.alert('Compte backend requis', `Aucun compte ${operator} actif n’est affecté à cette boutique. Configure d’abord le compte côté serveur.`);
       return;
@@ -94,14 +106,14 @@ export default function NewTransactionScreen() {
       status: status === 'failed' ? 'failed' : status,
       source: 'manual' as const,
       note,
-      idempotency_key: `mobile-${Date.now()}-${reference.trim() || amountCents}`,
+      idempotency_key: createIdempotencyKey('mobile-tx'),
     } : null;
     if (session && backendAccount && serverPayload) {
       try {
         const serverTransaction = await shopflowApi.createTransaction(serverPayload, session.access_token);
         serverMessage = ` Serveur : ${serverTransaction.reconciliation_status}.`;
       } catch (cause) {
-        if (serverPayload) await enqueueTransaction(serverPayload);
+        if (serverPayload) await enqueueTransaction(session.shop_id, serverPayload);
         setBackendError(cause instanceof Error ? cause.message : 'Synchronisation serveur impossible.');
         serverMessage = ' Serveur indisponible : conservée localement pour synchronisation ultérieure.';
       }
@@ -144,6 +156,19 @@ export default function NewTransactionScreen() {
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {operators.map((item) => <ChoiceChip key={item} label={item} selected={operator === item} onPress={() => setOperator(item)} />)}
       </View>
+      {session ? (
+        <>
+          <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Compte opérationnel</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {backendAccounts.filter((item) => item.operator === operator && item.active).map((item) => (
+              <ChoiceChip key={item.id} label={item.label} selected={backendAccountId === item.id} onPress={() => setBackendAccountId(item.id)} />
+            ))}
+          </View>
+          {backendAccounts.filter((item) => item.operator === operator && item.active).length === 0 ? (
+            <Text style={{ color: colors.warning, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>Aucun compte {operator} actif n’est disponible pour cette boutique.</Text>
+          ) : null}
+        </>
+      ) : null}
 
       <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Type d’opération</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
