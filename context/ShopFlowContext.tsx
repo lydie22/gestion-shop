@@ -179,7 +179,7 @@ export interface ShopSettings {
 
 export interface ShopData {
   version: 2;
-  seededAt: string;
+  initializedAt: string;
   referenceBalances: Record<Operator, number>;
   referenceMetadata: Record<Operator, { capturedAt: string; source: string; confidence: 'manual' | 'server' }>;
   referenceCashCents: number;
@@ -207,7 +207,7 @@ const emptyData = (): ShopData => {
   ) as ShopData['referenceMetadata'];
   return {
     version: 2,
-    seededAt: now,
+    initializedAt: now,
     referenceBalances: { 'Airtel Money': 0, 'Orange Money': 0, 'M-Pesa': 0 },
     referenceMetadata,
     referenceCashCents: 0,
@@ -249,7 +249,7 @@ export const anomalySeverityLabel: Record<Severity, string> = {
 };
 
 export function getWalletBalance(data: ShopData, operator: Operator) {
-  const anchorAt = Date.parse(data.referenceMetadata[operator]?.capturedAt ?? data.seededAt);
+  const anchorAt = Date.parse(data.referenceMetadata[operator]?.capturedAt ?? data.initializedAt);
   return (
     data.referenceBalances[operator] +
     data.transactions
@@ -264,7 +264,7 @@ export function getWalletBalance(data: ShopData, operator: Operator) {
 }
 
 export function getCashBalance(data: ShopData) {
-  const anchorAt = Date.parse(data.referenceCashMetadata?.capturedAt ?? data.seededAt);
+  const anchorAt = Date.parse(data.referenceCashMetadata?.capturedAt ?? data.initializedAt);
   const transactionMovements = data.transactions
     .filter(
       (transaction) =>
@@ -342,6 +342,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
             const restored: ShopData = {
               ...defaults,
               ...parsed,
+              initializedAt: parsed.initializedAt ?? (parsed as ShopData & { seededAt?: string }).seededAt ?? defaults.initializedAt,
               referenceMetadata: parsed.referenceMetadata ?? defaults.referenceMetadata,
               referenceCashMetadata: parsed.referenceCashMetadata ?? defaults.referenceCashMetadata,
               testChecks: parsed.testChecks ?? {},
