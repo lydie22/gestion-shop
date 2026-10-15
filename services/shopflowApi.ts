@@ -213,7 +213,11 @@ export const shopflowApi = {
   getSubscription: (accessToken: string) => request<SubscriptionSummary>('/api/v1/subscription', {}, accessToken),
   updateSubscription: (input: { plan: SubscriptionSummary['plan']; status: SubscriptionSummary['status']; current_period_end?: string }, accessToken: string) => request<SubscriptionSummary>('/api/v1/subscription', { method: 'PATCH', body: JSON.stringify(input) }, accessToken),
   listAccounts: (accessToken: string) => request<BackendAccount[]>('/api/v1/accounts', {}, accessToken),
-  listTransactions: (accessToken: string) => request<BackendTransaction[]>('/api/v1/transactions?limit=500', {}, accessToken),
+  listTransactions: (accessToken: string, options: { limit?: number; offset?: number } = {}) => {
+    const limit = options.limit ?? 100;
+    const offset = options.offset ?? 0;
+    return request<BackendTransaction[]>(`/api/v1/transactions?limit=${limit}&offset=${offset}`, {}, accessToken);
+  },
   createAccount: (input: { operator: string; label: string; currency?: string; opening_balance_cents: number }, accessToken: string) => request<BackendAccount>('/api/v1/accounts', { method: 'POST', body: JSON.stringify(input) }, accessToken),
   listAgents: (accessToken: string) => request<BackendAgent[]>('/api/v1/agents', {}, accessToken),
   createAgent: (input: { name: string; user_id?: string }, accessToken: string) => request<BackendAgent>('/api/v1/agents', { method: 'POST', body: JSON.stringify(input) }, accessToken),

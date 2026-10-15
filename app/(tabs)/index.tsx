@@ -149,7 +149,7 @@ export default function DashboardScreen() {
       </Card>
       ) : null}
 
-      <SectionTitle title="Comptes opérationnels" action="Détails" onAction={() => router.push('/reports')} />
+      <SectionTitle title="Comptes opérationnels" action="Voir les comptes" onAction={() => router.push('/accounts')} />
       {remoteAccounts ? remoteAccounts.map((account) => (
         <Card key={account.id} onPress={() => router.push('/ledger')}>
           <Row style={{ justifyContent: 'space-between' }}>

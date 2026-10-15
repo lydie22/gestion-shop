@@ -414,7 +414,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
       const selectedShop = accessibleShops.find((shop) => shop.id === session.shop_id);
 
       const serverTransactions: Transaction[] = transactions.map((row: BackendTransaction) => {
-        const operator = accountOperators.get(row.account_id) ?? 'Airtel Money';
+        const operator = accountOperators.get(row.account_id) ?? ('Compte inconnu' as Operator);
         const electronicDelta = ['deposit', 'transfer_out', 'fee'].includes(row.operation_type)
           ? -row.amount_cents - row.fee_cents
           : row.amount_cents - row.fee_cents;

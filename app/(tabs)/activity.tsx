@@ -2,7 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { Badge, Card, ChoiceChip, Field, IconButton, Row, Screen, SectionTitle, Spacer } from '@/components/shopflow/ui';
+import { Badge, Button, Card, ChoiceChip, Field, IconButton, Row, Screen, SectionTitle, Spacer } from '@/components/shopflow/ui';
 import { formatDate, formatMoney, statusName, transactionStatusTone, transactionTypeName } from '@/components/shopflow/format';
 import { Transaction, TransactionStatus, useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
@@ -24,47 +24,74 @@ export default function ActivityScreen() {
   const [filter, setFilter] = useState<(typeof filters)[number]['value']>('all');
   const [remoteTransactions, setRemoteTransactions] = useState<Transaction[] | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [remoteHasMore, setRemoteHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [remoteAccountNames, setRemoteAccountNames] = useState<Map<string, Transaction['operator']>>(new Map());
+  const [remoteAgentNames, setRemoteAgentNames] = useState<Map<string, string>>(new Map());
+
+  function mapServerTransaction(row: BackendTransaction, accountNames: Map<string, Transaction['operator']>, agentNames: Map<string, string>): Transaction {
+    return {
+      id: row.id,
+      reference: row.reference,
+      operator: accountNames.get(row.account_id) ?? ('Compte inconnu' as Transaction['operator']),
+      type: (row.operation_type as Transaction['type']) || 'adjustment',
+      amountCents: row.amount_cents,
+      feeCents: row.fee_cents,
+      commissionCents: row.commission_expected_cents,
+      electronicDeltaCents: 0,
+      cashDeltaCents: 0,
+      status: (row.status as Transaction['status']) || 'pending',
+      matchStatus: (row.reconciliation_status as Transaction['matchStatus']) || 'unmatched',
+      agent: row.agent_id ? (agentNames.get(row.agent_id) ?? 'Agent non identifié') : 'Non attribué',
+      note: row.note ?? 'Transaction synchronisée depuis le backend.',
+      source: 'server',
+      createdAt: row.created_at,
+    };
+  }
 
   useEffect(() => {
     if (!session) {
       setRemoteTransactions(null);
       setRemoteError(null);
+      setRemoteHasMore(false);
       return;
     }
     let active = true;
     Promise.all([
-      shopflowApi.listTransactions(session.access_token),
+      shopflowApi.listTransactions(session.access_token, { limit: 100, offset: 0 }),
       shopflowApi.listAccounts(session.access_token),
       shopflowApi.listAgents(session.access_token),
     ]).then(([rows, accounts, agents]) => {
       if (!active) return;
       const accountNames = new Map(accounts.map((account) => [account.id, account.operator as Transaction['operator']]));
       const agentNames = new Map(agents.map((agent) => [agent.id, agent.name]));
-      setRemoteTransactions(rows.map((row: BackendTransaction) => ({
-        id: row.id,
-        reference: row.reference,
-        operator: accountNames.get(row.account_id) ?? 'Airtel Money',
-        type: (row.operation_type as Transaction['type']) || 'adjustment',
-        amountCents: row.amount_cents,
-        feeCents: row.fee_cents,
-        commissionCents: row.commission_expected_cents,
-        electronicDeltaCents: 0,
-        cashDeltaCents: 0,
-        status: (row.status as Transaction['status']) || 'pending',
-        matchStatus: (row.reconciliation_status as Transaction['matchStatus']) || 'unmatched',
-        agent: row.agent_id ? (agentNames.get(row.agent_id) ?? 'Agent') : 'Non attribué',
-        note: row.note ?? 'Transaction synchronisée depuis le backend.',
-        source: 'server',
-        createdAt: row.created_at,
-      })));
+      setRemoteAccountNames(accountNames);
+      setRemoteAgentNames(agentNames);
+      setRemoteTransactions(rows.map((row: BackendTransaction) => mapServerTransaction(row, accountNames, agentNames)));
+      setRemoteHasMore(rows.length === 100);
       setRemoteError(null);
     }).catch((error: unknown) => {
       if (!active) return;
       setRemoteTransactions(null);
+      setRemoteHasMore(false);
       setRemoteError(error instanceof Error ? error.message : 'Transactions serveur indisponibles.');
     });
     return () => { active = false; };
   }, [session?.access_token]);
+
+  async function loadMore() {
+    if (!session || !remoteHasMore || loadingMore || !remoteTransactions) return;
+    setLoadingMore(true);
+    try {
+      const rows = await shopflowApi.listTransactions(session.access_token, { limit: 100, offset: remoteTransactions.length });
+      setRemoteTransactions((current) => current ? [...current, ...rows.map((row) => mapServerTransaction(row, remoteAccountNames, remoteAgentNames))] : current);
+      setRemoteHasMore(rows.length === 100);
+    } catch (error: unknown) {
+      setRemoteError(error instanceof Error ? error.message : 'La page suivante est indisponible.');
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const transactions = remoteTransactions ?? data.transactions;
   const visibleTransactions = useMemo(
@@ -141,6 +168,7 @@ export default function ActivityScreen() {
           </Pressable>
         ))
       )}
+      {session && remoteHasMore ? <Button title={loadingMore ? 'Chargement…' : 'Charger plus'} variant="secondary" onPress={() => void loadMore()} loading={loadingMore} /> : null}
       <Spacer size={8} />
     </Screen>
   );

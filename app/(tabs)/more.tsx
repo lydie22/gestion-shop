@@ -8,6 +8,7 @@ import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
 
 const menu = [
+  { title: 'Comptes Airtel', detail: 'Soldes théoriques et comptes accessibles', icon: 'credit-card' as const, route: '/accounts', roles: ['owner', 'supervisor', 'agent'] },
   { title: 'Rapports & commissions', detail: 'Synthèse de vos opérations et commissions', icon: 'bar-chart-2' as const, route: '/reports', roles: ['owner', 'supervisor', 'agent'] },
   { title: 'Journal financier', detail: 'Soldes et mouvements des comptes autorisés', icon: 'list' as const, route: '/ledger', roles: ['owner', 'supervisor', 'agent'] },
   { title: 'Scénarios de contrôle', detail: 'Liste de suivi des vérifications recommandées', icon: 'check-square' as const, route: '/checklist', roles: ['owner', 'supervisor'] },
