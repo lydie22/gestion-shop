@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import React, {
   createContext,
   ReactNode,
@@ -9,8 +10,50 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { Platform } from 'react-native';
+import { useAuth } from '@/context/AuthContext';
+import { enqueueSmsEvent } from '@/services/smsSyncQueue';
+import { readSecureBlob, writeSecureBlob } from '@/services/secureQueueStorage';
 
 const STORAGE_KEY = 'shopflow.local.v1';
+const SECURE_DATA_KEY = 'shopflow.data.secure.v1';
+
+function protectedSmsKey(storageKey: string, eventId: string) {
+  const safeStorageKey = storageKey.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeEventId = eventId.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `shopflow.sms.raw.v1.${safeStorageKey}.${safeEventId}`;
+}
+
+function shouldProtectLocalText() {
+  return Platform.OS !== 'web';
+}
+
+const SECURE_SMS_CHUNK_SIZE = 1500;
+
+async function readProtectedSms(storageKey: string, eventId: string): Promise<string | null> {
+  const key = protectedSmsKey(storageKey, eventId);
+  const metadata = await SecureStore.getItemAsync(`${key}.meta`);
+  if (metadata) {
+    try {
+      const { count } = JSON.parse(metadata) as { count: number };
+      if (Number.isInteger(count) && count >= 0) {
+        const chunks = await Promise.all(Array.from({ length: count }, (_, index) => SecureStore.getItemAsync(`${key}.${index}`)));
+        return chunks.every((chunk) => chunk !== null) ? chunks.join('') : null;
+      }
+    } catch {
+      return null;
+    }
+  }
+  // Compatibilité avec les valeurs créées avant le stockage fragmenté.
+  return SecureStore.getItemAsync(key);
+}
+
+async function writeProtectedSms(storageKey: string, eventId: string, rawText: string): Promise<void> {
+  const key = protectedSmsKey(storageKey, eventId);
+  const chunks = rawText.match(new RegExp(`.{1,${SECURE_SMS_CHUNK_SIZE}}`, 'gs')) ?? [''];
+  await Promise.all(chunks.map((chunk, index) => SecureStore.setItemAsync(`${key}.${index}`, chunk)));
+  await SecureStore.setItemAsync(`${key}.meta`, JSON.stringify({ count: chunks.length }));
+}
 
 export type Operator = 'Airtel Money' | 'Orange Money' | 'M-Pesa';
 export type TransactionType =
@@ -57,6 +100,7 @@ export interface CashMovement {
   status: 'confirmed' | 'pending' | 'rejected';
   createdAt: string;
   agent: string;
+  serverId?: string;
 }
 
 export interface CashSession {
@@ -95,9 +139,13 @@ export interface SmsEvent {
   id: string;
   rawText: string;
   receivedAt: string;
+  sender?: string;
   type: string;
+  messageStatus?: 'confirmed' | 'failed' | 'reversed' | 'unknown';
   operator?: Operator;
   amountCents?: number;
+  feeCents?: number;
+  commissionCents?: number;
   balanceCents?: number;
   reference?: string;
   confidence: 'high' | 'low';
@@ -523,7 +571,7 @@ interface ShopFlowContextValue {
   openCashSession: (openingCountCents: number, explanation: string) => void;
   closeCashSession: (closingCountCents: number, explanation: string) => void;
   setAnomalyStatus: (id: string, status: 'in_review' | 'resolved', note: string) => void;
-  addSmsText: (text: string, operator: Operator) => void;
+  addSmsText: (text: string, operator: Operator, metadata?: { sender?: string; receivedAt?: string }) => void;
   addAgent: (name: string, role: Agent['role']) => void;
   updateSettings: (patch: Partial<ShopSettings>) => void;
   updateReferenceBalances: (referenceBalances: Record<Operator, number>, referenceCashCents: number, source: string) => void;
@@ -534,60 +582,119 @@ interface ShopFlowContextValue {
 const ShopFlowContext = createContext<ShopFlowContextValue | null>(null);
 
 export function ShopFlowProvider({ children }: { children: ReactNode }) {
+  const { session } = useAuth();
+  const storageKey = session ? `${STORAGE_KEY}.${session.shop_id}` : `${STORAGE_KEY}.local`;
   const [data, setData] = useState<ShopData>(() => seedData());
   const [isReady, setIsReady] = useState(false);
+  const [loadedStorageKey, setLoadedStorageKey] = useState<string | null>(null);
   const [storageIssue, setStorageIssue] = useState(false);
   const skipNextSave = useRef(false);
+  // Serialize persistence writes so a slower write for an older state cannot
+  // finish after a newer state and overwrite it locally.
+  const persistenceChain = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let active = true;
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((saved) => {
-        if (!active) return;
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved) as ShopData;
-            if (parsed.version === 1 && parsed.transactions && parsed.settings) {
-              const defaults = seedData();
-              setData({
-                ...defaults,
-                ...parsed,
-                referenceMetadata: parsed.referenceMetadata ?? defaults.referenceMetadata,
-                referenceCashMetadata: parsed.referenceCashMetadata ?? defaults.referenceCashMetadata,
-                testChecks: parsed.testChecks ?? {},
-              });
+    setIsReady(false);
+    setLoadedStorageKey(null);
+    setData(seedData());
+    const loadPersistedData = async () => {
+      const secureKey = `${SECURE_DATA_KEY}.${storageKey}`;
+      const saved = shouldProtectLocalText()
+        ? ((await readSecureBlob(secureKey)) ?? (await AsyncStorage.getItem(storageKey)))
+        : await AsyncStorage.getItem(storageKey);
+      if (!active) return;
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as ShopData;
+          if (parsed.version === 1 && parsed.transactions && parsed.settings) {
+            const defaults = seedData();
+            const restored: ShopData = {
+              ...defaults,
+              ...parsed,
+              referenceMetadata: parsed.referenceMetadata ?? defaults.referenceMetadata,
+              referenceCashMetadata: parsed.referenceCashMetadata ?? defaults.referenceCashMetadata,
+              testChecks: parsed.testChecks ?? {},
+            };
+            if (shouldProtectLocalText()) {
+              restored.smsEvents = await Promise.all(restored.smsEvents.map(async (event) => {
+                if (event.source === 'demo') return event;
+                const protectedText = await readProtectedSms(storageKey, event.id);
+                return protectedText ? { ...event, rawText: protectedText } : event;
+              }));
             }
-          } catch {
-            skipNextSave.current = true;
-            setStorageIssue(true);
-            setData(seedData());
+            setData(restored);
+            if (shouldProtectLocalText() && !(await readSecureBlob(secureKey))) {
+              await writeSecureBlob(secureKey, JSON.stringify(restored));
+              await AsyncStorage.removeItem(storageKey);
+            }
           }
+        } catch {
+          skipNextSave.current = true;
+          setStorageIssue(true);
+          setData(seedData());
         }
-        setIsReady(true);
-      })
+      }
+      setLoadedStorageKey(storageKey);
+      setIsReady(true);
+    };
+    loadPersistedData()
       .catch(() => {
         if (active) {
           skipNextSave.current = true;
           setStorageIssue(true);
+          setLoadedStorageKey(storageKey);
           setIsReady(true);
         }
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [storageKey]);
 
   useEffect(() => {
-    if (isReady) {
+    if (isReady && loadedStorageKey === storageKey) {
       if (skipNextSave.current) {
         skipNextSave.current = false;
         return;
       }
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-        .then(() => setStorageIssue(false))
-        .catch(() => setStorageIssue(true));
+      const snapshot = data;
+      const persist = async () => {
+        let persisted = snapshot;
+        if (shouldProtectLocalText()) {
+          await Promise.all(snapshot.smsEvents.filter((event) => event.source !== 'demo').map((event) => writeProtectedSms(storageKey, event.id, event.rawText)));
+          persisted = {
+            ...snapshot,
+            smsEvents: snapshot.smsEvents.map((event) => event.source === 'demo' ? event : { ...event, rawText: '[contenu protégé localement]' }),
+          };
+        }
+        if (shouldProtectLocalText()) {
+          await writeSecureBlob(`${SECURE_DATA_KEY}.${storageKey}`, JSON.stringify(persisted));
+        } else {
+          await AsyncStorage.setItem(storageKey, JSON.stringify(persisted));
+        }
+      };
+      persistenceChain.current = persistenceChain.current
+        .catch(() => undefined)
+        .then(persist)
+        .then(() => setStorageIssue(false), () => setStorageIssue(true));
     }
-  }, [data, isReady]);
+  }, [data, isReady, loadedStorageKey, storageKey]);
+
+  // Les événements SMS locaux survivent au redémarrage et sont versés dans la
+  // file réseau dès qu'une session serveur existe. Les exemples fictifs restent
+  // strictement locaux et ne sont jamais envoyés.
+  useEffect(() => {
+    if (!session || !isReady || loadedStorageKey !== storageKey) return;
+    const pending = data.smsEvents.filter((event) => event.source !== 'demo');
+    void Promise.all(pending.map((event) => enqueueSmsEvent(session.shop_id, {
+      operator: event.operator ?? 'Opérateur inconnu',
+      raw_text: event.rawText,
+      sender: event.sender,
+      received_at: event.receivedAt,
+      idempotency_key: `local-sms-${event.id}`,
+    })));
+  }, [data.smsEvents, isReady, loadedStorageKey, session, storageKey]);
 
   const recordAudit = useCallback(
     (current: ShopData, action: string, detail: string): AuditEvent[] => [
@@ -900,11 +1007,13 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
   );
 
   const addSmsText = useCallback(
-    (text: string, operator: Operator) => {
+    (text: string, operator: Operator, metadata?: { sender?: string; receivedAt?: string }) => {
       const rawText = text.trim();
       if (!rawText) return;
       const amountMatch = rawText.match(/montant\s*[:=]\s*([\d\s.,]+)\s*(USD|EUR|CDF|KES)?/i);
       const balanceMatch = rawText.match(/(?:nouveau\s+)?solde(?:\s+disponible)?\s*[:=]\s*([\d\s.,]+)\s*(USD|EUR|CDF|KES)?/i);
+      const feeMatch = rawText.match(/(?:frais|fee)\s*[:=]\s*([\d\s.,]+)\s*(USD|EUR|CDF|KES)?/i);
+      const commissionMatch = rawText.match(/(?:commission|com)\s*[:=]\s*([\d\s.,]+)\s*(USD|EUR|CDF|KES)?/i);
       const referenceMatch = rawText.match(/référence\s*[:=]\s*([A-Z0-9-]+)/i);
       const toCents = (value?: string) => {
         if (!value) return undefined;
@@ -919,7 +1028,25 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         if (duplicate) return current;
         const amountCents = toCents(amountMatch?.[1]);
         const balanceCents = toCents(balanceMatch?.[1]);
+        const feeCents = toCents(feeMatch?.[1]);
+        const commissionCents = toCents(commissionMatch?.[1]);
         const reference = referenceMatch?.[1];
+        const messageStatus: SmsEvent['messageStatus'] = /(?:annul|invers|revers|cancel|chargeback)/i.test(rawText)
+          ? 'reversed'
+          : /(?:échec|echec|échou|echou|rejet|refus|failed|declin)/i.test(rawText)
+            ? 'failed'
+            : /(?:réussi|reussi|confirm|succès|succes|effectué|effectue|completed|successful)/i.test(rawText)
+              ? 'confirmed'
+              : 'unknown';
+        const parsedType = balanceCents !== undefined
+          ? 'Point de solde'
+          : messageStatus === 'failed'
+            ? 'Échec annoncé'
+            : messageStatus === 'reversed'
+              ? 'Inversion annoncée'
+              : amountCents !== undefined
+                ? 'Transaction possible'
+                : 'Message inconnu';
         const transaction = reference
           ? current.transactions.find(
               (candidate) =>
@@ -931,14 +1058,22 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         const event: SmsEvent = {
           id: makeId('sms'),
           rawText,
-          receivedAt: new Date().toISOString(),
-          type: balanceCents !== undefined ? 'Point de solde' : amountCents !== undefined ? 'Transaction possible' : 'Message inconnu',
+          receivedAt: metadata?.receivedAt ?? new Date().toISOString(),
+          sender: metadata?.sender,
+          type: parsedType,
+          messageStatus,
           operator,
           amountCents,
+          feeCents,
+          commissionCents,
           balanceCents,
           reference,
           confidence: amountCents !== undefined || balanceCents !== undefined ? 'high' : 'low',
-          reconciliation: transaction
+          reconciliation: messageStatus === 'failed' || messageStatus === 'reversed'
+            ? transaction
+              ? `Le message annonce ${messageStatus === 'failed' ? 'un échec' : 'une inversion'} pour une opération existante ; aucun mouvement automatique.`
+              : 'État non réussi sans correspondance fiable ; aucun mouvement financier créé.'
+            : transaction
             ? exactAmount
               ? 'Référence et montant correspondent à une saisie locale ; preuve opérateur non vérifiée.'
               : 'Référence trouvée, mais les montants doivent être comparés.'
