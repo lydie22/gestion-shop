@@ -11,9 +11,9 @@ const menu = [
   { title: 'Rapports & commissions', detail: 'Synthèse journalière, par opérateur et par agent', icon: 'bar-chart-2' as const, route: '/reports' },
   { title: 'Journal financier', detail: 'Reconstituer chaque solde depuis un point de référence', icon: 'list' as const, route: '/ledger' },
   { title: 'Scénarios de contrôle', detail: 'Liste de suivi des 12 vérifications recommandées', icon: 'check-square' as const, route: '/checklist' },
-  { title: 'Messages de démonstration', detail: 'Saisir un texte à analyser manuellement', icon: 'message-square' as const, route: '/sms' },
-  { title: 'Agents & rôles', detail: 'Profils locaux et affectations indicatives', icon: 'users' as const, route: '/team' },
-  { title: 'Journal d’audit', detail: 'Historique des actions conservé sur cet appareil', icon: 'clock' as const, route: '/audit' },
+  { title: 'Messages SMS', detail: 'Importer et rapprocher les événements autorisés', icon: 'message-square' as const, route: '/sms' },
+  { title: 'Agents & rôles', detail: 'Profils, permissions et affectations de la boutique', icon: 'users' as const, route: '/team' },
+  { title: 'Journal d’audit', detail: 'Historique des actions sensibles côté serveur', icon: 'clock' as const, route: '/audit' },
   { title: 'Paramètres de la boutique', detail: 'Devise, seuil d’écart et données locales', icon: 'settings' as const, route: '/settings' },
 ] as const;
 
@@ -62,7 +62,7 @@ export default function MoreScreen() {
       </Card>
       <Spacer size={5} />
       <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 17, textAlign: 'center', fontFamily: 'Inter_400Regular' }}>
-        Version de démonstration locale · aucune donnée financière réelle n’est connectée.
+        Les données financières affichées proviennent du serveur lorsque la session est active. Les données locales en attente sont signalées.
       </Text>
     </Screen>
   );

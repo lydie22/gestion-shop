@@ -3,20 +3,17 @@ import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { Badge, Button, Card, ChoiceChip, Field, Row, Screen, SectionTitle } from '@/components/shopflow/ui';
-import { Agent, useShopFlow } from '@/context/ShopFlowContext';
+import { useShopFlow } from '@/context/ShopFlowContext';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
 import { BackendAccount, BackendRole, shopflowApi } from '@/services/shopflowApi';
 
-const roles: Agent['role'][] = ['Agent', 'Superviseur', 'Propriétaire'];
-
 export default function TeamScreen() {
-  const { data, addAgent } = useShopFlow();
+  const { data } = useShopFlow();
   const colors = useColors();
   const { session } = useAuth();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
-  const [role, setRole] = useState<Agent['role']>('Agent');
   const [members, setMembers] = useState<Array<{ user_id: string; email: string; full_name: string; role: BackendRole; active: boolean }>>([]);
   const [remoteAdding, setRemoteAdding] = useState(false);
   const [memberEmail, setMemberEmail] = useState('');
@@ -96,10 +93,17 @@ export default function TeamScreen() {
       Alert.alert('Nom requis', 'Saisis au moins deux caractères.');
       return;
     }
-    addAgent(name, role);
-    setName('');
-    setRole('Agent');
-    setAdding(false);
+    if (!session) {
+      Alert.alert('Connexion requise', 'Un profil agent doit être créé dans la boutique côté serveur. Connecte-toi d’abord.');
+      return;
+    }
+    void shopflowApi.createAgent({ name: name.trim() }, session.access_token)
+      .then(async () => {
+        setBackendAgents(await shopflowApi.listAgents(session.access_token));
+        setName('');
+        setAdding(false);
+      })
+      .catch((cause) => Alert.alert('Création impossible', cause instanceof Error ? cause.message : 'Le profil serveur n’a pas pu être créé.'));
   }
 
   if (session?.role === 'agent') {
@@ -119,7 +123,7 @@ export default function TeamScreen() {
   }
 
   return (
-      <Screen title="Agents & rôles" subtitle={session ? `Gestion sécurisée · rôle ${session.role}` : 'Profils indicatifs conservés sur l’appareil'} back>
+      <Screen title="Agents & rôles" subtitle={session ? `Gestion sécurisée · rôle ${session.role}` : 'Connexion requise pour gérer la boutique'} back>
       <Card style={{ backgroundColor: colors.warningSurface, borderColor: colors.warningSurface }}>
         <Row style={{ alignItems: 'flex-start' }}>
           <Feather name="lock" size={17} color={colors.warning} />
@@ -132,11 +136,10 @@ export default function TeamScreen() {
       {adding ? (
         <Card>
           <Field label="Nom affiché" placeholder="Ex. Samira D." value={name} onChangeText={setName} />
-          <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Rôle indicatif</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {roles.map((item) => <ChoiceChip key={item} label={item} selected={role === item} onPress={() => setRole(item)} />)}
-          </View>
-          <Button title="Ajouter le profil local" icon="user-plus" onPress={saveAgent} />
+          <Text style={{ color: colors.mutedForeground, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
+            Le profil opérationnel est créé côté serveur. Le rôle d’accès est géré séparément par le compte membre.
+          </Text>
+          <Button title="Créer le profil serveur" icon="user-plus" onPress={saveAgent} />
         </Card>
       ) : null}
       {data.agents.map((agent) => (

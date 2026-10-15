@@ -134,18 +134,27 @@ export class ShopFlowApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}, accessToken?: string): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...init.headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...init.headers,
+      },
+    });
+  } catch (error) {
+    throw new ShopFlowApiError(0, `Le serveur est inaccessible. Vérifie la connexion et l’URL API (${API_URL}).`);
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const detail = typeof body.detail === 'string' ? body.detail : 'La requête backend a échoué.';
+    const detail = response.status === 401
+      ? 'Identifiants invalides ou compte absent sur le serveur Render.'
+      : response.status === 503
+        ? 'Le backend est démarré mais sa base de données n’est pas prête.'
+        : typeof body.detail === 'string' ? body.detail : `La requête backend a échoué (${response.status}).`;
     throw new ShopFlowApiError(response.status, detail);
   }
   return body as T;
@@ -180,6 +189,7 @@ export const shopflowApi = {
   listTransactions: (accessToken: string) => request<BackendTransaction[]>('/api/v1/transactions?limit=500', {}, accessToken),
   createAccount: (input: { operator: string; label: string; currency?: string; opening_balance_cents: number }, accessToken: string) => request<BackendAccount>('/api/v1/accounts', { method: 'POST', body: JSON.stringify(input) }, accessToken),
   listAgents: (accessToken: string) => request<Array<{ id: string; name: string; user_id?: string; active: boolean }>>('/api/v1/agents', {}, accessToken),
+  createAgent: (input: { name: string; user_id?: string }, accessToken: string) => request<{ id: string; name: string; user_id?: string; active: boolean }>('/api/v1/agents', { method: 'POST', body: JSON.stringify(input) }, accessToken),
   assignAccount: (accountId: string, input: { agent_id: string; assignment_role: 'operator' | 'shared_operator' | 'supervisor' }, accessToken: string) => request<{ id: string; account_id: string; agent_id: string; active: boolean }>(`/api/v1/accounts/${accountId}/assignments`, { method: 'POST', body: JSON.stringify(input) }, accessToken),
   createTransaction: (input: { account_id: string; reference: string; operation_type: string; amount_cents: number; fee_cents: number; commission_expected_cents: number; status: string; source: 'manual'; note?: string; idempotency_key: string }, accessToken: string) =>
     request<{ id: string; status: string; reconciliation_status: string }>('/api/v1/transactions', { method: 'POST', body: JSON.stringify(input) }, accessToken),

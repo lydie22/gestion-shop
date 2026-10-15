@@ -52,7 +52,7 @@ export default function DashboardScreen() {
     ...operators.map((operator) => data.referenceMetadata[operator].capturedAt),
     data.referenceCashMetadata.capturedAt,
   ].sort().at(-1);
-  const balanceDiscrepancy = data.anomalies.find((anomaly) => anomaly.id === 'demo-an-01');
+  const balanceDiscrepancy = data.anomalies.find((anomaly) => anomaly.type === 'Écart de solde' && anomaly.status !== 'resolved');
   const discrepancyOperator = balanceDiscrepancy?.operator;
   const discrepancyCalculated = discrepancyOperator ? getWalletBalance(data, discrepancyOperator) : 0;
   const discrepancyReported = Math.max(0, discrepancyCalculated - (balanceDiscrepancy?.amountCents ?? 0));
@@ -214,7 +214,7 @@ export default function DashboardScreen() {
           <View style={{ flex: 1, gap: 4 }}>
             <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>{remoteAccounts ? 'Données serveur + mode hors ligne' : session ? 'Session connectée · repli local' : 'Données locales uniquement'}</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
-              {session ? 'Les SMS importés restent contrôlés et synchronisables ; aucune lecture automatique non autorisée.' : 'Pas de serveur, de synchronisation ni de lecture automatique des SMS. Les exemples sont fictifs.'}
+              {session ? 'Les SMS importés restent contrôlés et synchronisables ; aucune lecture automatique non autorisée.' : 'Aucune donnée financière n’est affichée sans une session de boutique active.'}
             </Text>
           </View>
         </Row>

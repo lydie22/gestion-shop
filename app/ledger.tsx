@@ -90,7 +90,7 @@ export default function LedgerScreen() {
         reference: transaction.reference,
         deltaCents: cash ? transaction.cashDeltaCents : transaction.electronicDeltaCents,
         status: statusName(transaction.status),
-        source: transaction.source === 'demo' ? 'Exemple fictif' : 'Saisie locale',
+        source: transaction.source === 'server' ? 'Serveur' : 'Saisie locale',
         transactionId: transaction.id,
         note: transaction.note,
       }));
@@ -191,8 +191,8 @@ export default function LedgerScreen() {
         <Text style={{ color: colors.heroMuted, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
           Référence {formatMoney(referenceCents, data.settings.currency)} · {formatDate(anchorAt)} · {referenceSource.source}
         </Text>
-        <Badge tone={referenceSource.confidence === 'example' ? 'warning' : 'info'}>
-          {referenceSource.confidence === 'example' ? 'Référence fictive' : 'Référence manuelle · couverture non vérifiée'}
+        <Badge tone={referenceSource.confidence === 'server' ? 'info' : 'warning'}>
+          {referenceSource.confidence === 'server' ? 'Référence serveur' : 'Référence manuelle · couverture non vérifiée'}
         </Badge>
       </Card>
 
@@ -257,7 +257,7 @@ export default function LedgerScreen() {
                 {formatMoney(event.balanceCents ?? 0, data.settings.currency)} annoncé
               </Text>
               <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: 'Inter_400Regular' }}>
-                {formatDate(event.receivedAt)} · {event.source === 'demo' ? 'Exemple fictif' : 'Texte importé manuellement'}
+                {formatDate(event.receivedAt)} · {event.source === 'server' ? 'Événement serveur' : 'Texte importé manuellement'}
               </Text>
             </View>
             <Badge tone="warning">Point de contrôle</Badge>

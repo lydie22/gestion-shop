@@ -10,8 +10,6 @@ import { shopflowApi } from '@/services/shopflowApi';
 import { flushPendingSmsEvents, readPendingSmsEvents } from '@/services/smsSyncQueue';
 import { clearNativeSmsQueue, configureNativeSms, drainNativeSms, isNativeSmsAvailable } from '../modules/shopflow-sms/src';
 
-const sampleText = 'Transaction réussie. Montant : 50 USD Référence : AT-84921 Nouveau solde : 350 USD';
-
 export default function SmsScreen() {
   const { data, addSmsText, isReady } = useShopFlow();
   const { session } = useAuth();
@@ -91,21 +89,20 @@ export default function SmsScreen() {
         <Row style={{ alignItems: 'flex-start' }}>
           <Feather name="alert-triangle" size={17} color={colors.warning} />
           <Text style={{ flex: 1, color: colors.inkSoft, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_500Medium' }}>
-            {Platform.OS === 'android' && isNativeSmsAvailable ? 'La capture Android est optionnelle et limitée aux expéditeurs Airtel configurés après accord de la permission. Le parseur ne prouve pas à lui seul l’authenticité d’un message.' : 'ShopFlow ne lit pas les SMS sur cet appareil. Seuls les textes que tu colles ici sont analysés localement. Le parseur d’exemple ne prouve pas l’authenticité d’un message.'}
+            {Platform.OS === 'android' && isNativeSmsAvailable ? 'La capture Android est optionnelle et limitée aux expéditeurs Airtel configurés après accord de la permission. Le parseur ne prouve pas à lui seul l’authenticité d’un message.' : 'ShopFlow ne lit pas les SMS sur cet appareil. Seuls les textes que tu fournis volontairement sont analysés localement.'}
           </Text>
         </Row>
       </Card>
       <Card>
         <Text style={{ color: colors.foreground, fontSize: 15, fontFamily: 'Inter_700Bold' }}>Analyser un texte fourni</Text>
         <Text style={{ color: colors.mutedForeground, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
-          Extraction déterministe de la référence, du montant et du solde pour un format d’exemple. Aucun mouvement n’est créé automatiquement.
+          Extraction déterministe de la référence, du montant et du solde. Aucun mouvement financier confirmé n’est créé automatiquement.
         </Text>
         <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Opérateur déclaré</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {operators.map((item) => <ChoiceChip key={item} label={item} selected={operator === item} onPress={() => setOperator(item)} />)}
         </View>
         <Field label="Texte du message" placeholder="Colle ici un message anonymisé…" value={text} onChangeText={setText} multiline autoCapitalize="sentences" />
-        <Button title="Utiliser l’exemple fictif" variant="secondary" icon="copy" onPress={() => setText(sampleText)} />
         <Button title="Analyser sur cet appareil" icon="search" onPress={importText} />
         {Platform.OS === 'android' ? <Button title="Activer la capture SMS Airtel" variant="secondary" icon="smartphone" onPress={() => void enableNativeCapture()} /> : null}
         {session ? <Button title="Synchroniser vers le backend" variant="outline" icon="upload-cloud" onPress={() => void syncEvents()} disabled={data.smsEvents.length === 0} /> : null}
@@ -145,7 +142,7 @@ export default function SmsScreen() {
             <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 17, fontFamily: 'Inter_400Regular' }}>{event.rawText}</Text>
           </View>
           <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: 'Inter_400Regular' }}>
-            {event.source === 'demo' ? 'Exemple fictif' : 'Texte saisi manuellement'}
+            {event.source === 'server' ? 'Événement serveur' : 'Texte saisi manuellement'}
           </Text>
         </Card>
       ))}

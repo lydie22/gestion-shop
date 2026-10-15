@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
+import { deletePlatformValue, getPlatformValue, setPlatformValue } from '@/services/platformStorage';
 
 const CHUNK_SIZE = 1500;
 // Keep one explicit bound for write, read and cleanup. A previous mismatch
@@ -54,17 +54,17 @@ export async function writeSecureBlob(key: string, value: string): Promise<void>
   if (chunks.length > MAX_SECURE_BLOB_CHUNKS) {
     throw new Error('Les données locales sécurisées dépassent la capacité maximale autorisée.');
   }
-  await Promise.all(chunks.map((chunk, index) => SecureStore.setItemAsync(`${key}.${index}`, chunk)));
-  await SecureStore.setItemAsync(`${key}.meta`, JSON.stringify({ count: chunks.length }));
+  await Promise.all(chunks.map((chunk, index) => setPlatformValue(`${key}.${index}`, chunk)));
+  await setPlatformValue(`${key}.meta`, JSON.stringify({ count: chunks.length }));
 }
 
 export async function readSecureBlob(key: string): Promise<string | null> {
-  const metadata = await SecureStore.getItemAsync(`${key}.meta`);
+  const metadata = await getPlatformValue(`${key}.meta`);
   if (!metadata) return null;
   try {
     const { count } = JSON.parse(metadata) as { count: number };
     if (!Number.isInteger(count) || count < 1 || count > MAX_SECURE_BLOB_CHUNKS) return null;
-    const chunks = await Promise.all(Array.from({ length: count }, (_, index) => SecureStore.getItemAsync(`${key}.${index}`)));
+    const chunks = await Promise.all(Array.from({ length: count }, (_, index) => getPlatformValue(`${key}.${index}`)));
     return chunks.every((chunk) => chunk !== null) ? chunks.join('') : null;
   } catch {
     return null;
@@ -72,7 +72,7 @@ export async function readSecureBlob(key: string): Promise<string | null> {
 }
 
 export async function deleteSecureBlob(key: string): Promise<void> {
-  const metadata = await SecureStore.getItemAsync(`${key}.meta`);
+  const metadata = await getPlatformValue(`${key}.meta`);
   let count = 0;
   try {
     count = metadata ? (JSON.parse(metadata) as { count?: number }).count ?? 0 : 0;
@@ -80,8 +80,8 @@ export async function deleteSecureBlob(key: string): Promise<void> {
     count = 0;
   }
   await Promise.all([
-    SecureStore.deleteItemAsync(`${key}.meta`),
-    ...Array.from({ length: Math.max(0, Math.min(count, MAX_SECURE_BLOB_CHUNKS)) }, (_, index) => SecureStore.deleteItemAsync(`${key}.${index}`)),
+    deletePlatformValue(`${key}.meta`),
+    ...Array.from({ length: Math.max(0, Math.min(count, MAX_SECURE_BLOB_CHUNKS)) }, (_, index) => deletePlatformValue(`${key}.${index}`)),
   ]);
 }
 

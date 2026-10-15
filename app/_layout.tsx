@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -11,7 +11,7 @@ import {
   Inter_700Bold,
   useFonts,
 } from '@expo-google-fonts/inter';
-import { Stack, Redirect, useSegments } from 'expo-router';
+import { Stack, usePathname, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { ShopFlowProvider } from '@/context/ShopFlowContext';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
@@ -23,11 +23,28 @@ const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   const { session, isHydrating } = useAuth();
-  const segments = useSegments();
-  if (isHydrating) return null;
-  const onAuthRoute = segments[0] === 'auth';
-  if (!session && !onAuthRoute) return <Redirect href="/auth" />;
-  if (session && onAuthRoute) return <Redirect href="/(tabs)" />;
+  const pathname = usePathname();
+  const router = useRouter();
+  const lastRedirect = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (isHydrating) return;
+
+    const onAuthRoute = pathname === '/auth' || pathname.startsWith('/auth/');
+    const target = !session && !onAuthRoute ? '/auth' : session && onAuthRoute ? '/(tabs)' : null;
+
+    if (!target) {
+      lastRedirect.current = null;
+      return;
+    }
+
+    // Navigation must happen after the navigator is mounted. Calling Redirect
+    // while rendering the root Stack can make Expo Router update itself forever.
+    if (lastRedirect.current === target) return;
+    lastRedirect.current = target;
+    router.replace(target);
+  }, [isHydrating, pathname, router, session]);
+
   return (
     <Stack screenOptions={{ headerShown: false, headerBackTitle: 'Retour' }}>
       <Stack.Screen name="auth" options={{ headerShown: false }} />

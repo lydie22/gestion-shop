@@ -9,7 +9,7 @@ import { shopflowApi, SubscriptionSummary } from '@/services/shopflowApi';
 import { getLocalDeviceKey } from '@/services/deviceIdentity';
 
 export default function SettingsScreen() {
-  const { data, updateSettings, updateReferenceBalances, resetDemo } = useShopFlow();
+  const { data, updateSettings, updateReferenceBalances } = useShopFlow();
   const colors = useColors();
   const { session, accessibleShops, switchShop } = useAuth();
   const [shopName, setShopName] = useState(data.settings.shopName);
@@ -111,17 +111,6 @@ export default function SettingsScreen() {
     Alert.alert('Références mises à jour', 'Les soldes de départ sont datés et leur nouvelle source est inscrite dans le journal local.');
   }
 
-  function confirmReset() {
-    Alert.alert(
-      'Réinitialiser les données locales ?',
-      'Cette action remplacera les opérations, agents, alertes et préférences enregistrés sur cet appareil par les exemples de démonstration. Elle est irréversible depuis l’application.',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        { text: 'Réinitialiser', style: 'destructive', onPress: () => resetDemo() },
-      ],
-    );
-  }
-
   return (
       <Screen title="Paramètres" subtitle={session ? `Boutique connectée · rôle ${session.role}` : 'Préférences locales de la boutique'} back>
       <Card style={{ backgroundColor: colors.infoSurface, borderColor: colors.infoSurface }}>
@@ -216,14 +205,6 @@ export default function SettingsScreen() {
         <Limit text={session ? 'Les opérations synchronisées sont protégées par le rôle et la boutique côté serveur.' : 'Aucune synchronisation réseau ou sauvegarde distante.'} />
         <Limit text={session ? 'Les profils locaux restent indicatifs ; les permissions financières réelles sont serveur.' : 'Les profils d’agents ne protègent pas l’accès aux données de l’appareil.'} />
         <Limit text="Les preuves et statuts sont saisis localement et ne sont pas validés par un opérateur." />
-      </Card>
-      <SectionTitle title="Données de démonstration" />
-      <Card style={{ backgroundColor: colors.dangerSurface, borderColor: colors.dangerSurface }}>
-        <Text style={{ color: colors.destructive, fontSize: 14, fontFamily: 'Inter_700Bold' }}>Réinitialisation destructive</Text>
-        <Text style={{ color: colors.inkSoft, fontSize: 12, lineHeight: 18, fontFamily: 'Inter_400Regular' }}>
-          Remplace les données locales existantes par les exemples initiaux. Exporte d’abord les informations que tu veux conserver.
-        </Text>
-        <Button title="Réinitialiser les données de l’appareil" icon="rotate-ccw" variant="danger" onPress={confirmReset} />
       </Card>
     </Screen>
   );

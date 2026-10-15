@@ -362,8 +362,8 @@ export default function ReportsScreen() {
               <Card key={operator}>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: 'Inter_700Bold' }}>{operator}</Text>
-                  <Badge tone={reference.confidence === 'example' || ageHours >= 24 ? 'warning' : 'info'}>
-                    {reference.confidence === 'example' ? 'Exemple fictif' : ageHours >= 24 ? 'Référence ancienne' : 'Référence manuelle'}
+                  <Badge tone={reference.confidence !== 'server' || ageHours >= 24 ? 'warning' : 'info'}>
+                    {reference.confidence !== 'server' ? 'Référence manuelle' : ageHours >= 24 ? 'Référence ancienne' : 'Référence serveur'}
                   </Badge>
                 </Row>
                 <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>

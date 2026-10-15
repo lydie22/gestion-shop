@@ -29,7 +29,7 @@ export default function TransactionDetailScreen() {
     );
   }
 
-  const sourceLabel = transaction.source === 'demo' ? 'Exemple fictif' : 'Saisie manuelle locale';
+  const sourceLabel = transaction.source === 'server' ? 'Serveur' : 'Saisie manuelle locale';
   const electronicAnchor = Date.parse(data.referenceMetadata[transaction.operator].capturedAt);
   const cashAnchor = Date.parse(data.referenceCashMetadata.capturedAt);
   const transactionAt = Date.parse(transaction.createdAt);
@@ -176,7 +176,7 @@ export default function TransactionDetailScreen() {
           <View key={message.id} style={{ gap: 5, paddingVertical: 6 }}>
             <Row style={{ justifyContent: 'space-between' }}>
               <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>{formatDate(message.receivedAt)}</Text>
-              <Badge tone={message.confidence === 'high' ? 'info' : 'warning'}>{message.source === 'demo' ? 'Exemple fictif' : 'Texte importé'}</Badge>
+              <Badge tone={message.confidence === 'high' ? 'info' : 'warning'}>{message.source === 'server' ? 'Événement serveur' : 'Texte importé'}</Badge>
             </Row>
             <Text style={{ color: colors.inkSoft, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>{message.rawText}</Text>
             {message.balanceCents !== undefined ? (

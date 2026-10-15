@@ -104,5 +104,7 @@ function ClassicTabs() {
 }
 
 export default function TabLayout() {
-  return isLiquidGlassAvailable() ? <LiquidTabs /> : <ClassicTabs />;
+  // NativeTabs is not supported by Expo Web. Keep the classic navigator for
+  // web so the browser never mounts a native-only tab implementation.
+  return Platform.OS !== 'web' && isLiquidGlassAvailable() ? <LiquidTabs /> : <ClassicTabs />;
 }

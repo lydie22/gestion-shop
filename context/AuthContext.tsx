@@ -1,11 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
 import React, { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { AccessibleShop, AuthSession, shopflowApi } from '@/services/shopflowApi';
 import { flushPendingCashMovements } from '@/services/cashSyncQueue';
 import { flushPendingSmsEvents } from '@/services/smsSyncQueue';
 import { flushPendingTransactions } from '@/services/syncQueue';
+import { deletePlatformValue, getPlatformValue, setPlatformValue } from '@/services/platformStorage';
 
 const SESSION_KEY = 'shopflow.auth.session.v2';
 const LEGACY_SESSION_KEY = 'shopflow.auth.session.v1';
@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [session]);
 
   useEffect(() => {
-    SecureStore.getItemAsync(SESSION_KEY)
+    getPlatformValue(SESSION_KEY)
       .then(async (raw) => {
         // One-time migration from the old plaintext AsyncStorage session.
         // Access and refresh tokens must never remain in general storage.
@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!protectedRaw) {
           const legacy = await AsyncStorage.getItem(LEGACY_SESSION_KEY);
           if (legacy) {
-            await SecureStore.setItemAsync(SESSION_KEY, legacy);
+            await setPlatformValue(SESSION_KEY, legacy);
             await AsyncStorage.removeItem(LEGACY_SESSION_KEY);
             protectedRaw = legacy;
           }
@@ -67,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const next = await shopflowApi.refresh(current.refresh_token);
         if (!active) return;
-        await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify(next));
+        await setPlatformValue(SESSION_KEY, JSON.stringify(next));
         setSession(next);
       } catch {
         // Une coupure réseau ne déconnecte pas l'utilisateur localement.
@@ -134,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isHydrating, session?.access_token, session?.shop_id]);
 
   const persist = useCallback(async (next: AuthSession) => {
-    await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify(next));
+    await setPlatformValue(SESSION_KEY, JSON.stringify(next));
     setSession(next);
     setError(null);
   }, []);
@@ -167,7 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // La révocation serveur peut être réessayée ; la session locale est supprimée immédiatement.
       }
     }
-    await SecureStore.deleteItemAsync(SESSION_KEY);
+    await deletePlatformValue(SESSION_KEY);
     await AsyncStorage.removeItem(LEGACY_SESSION_KEY);
     setSession(null);
     setAccessibleShops([]);

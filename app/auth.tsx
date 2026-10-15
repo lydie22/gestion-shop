@@ -1,6 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Button, Card, Field, Spacer } from '@/components/shopflow/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useColors } from '@/hooks/useColors';
@@ -8,6 +8,7 @@ import { useColors } from '@/hooks/useColors';
 export default function AuthScreen() {
   const colors = useColors();
   const { login, register, error } = useAuth();
+  const { width: viewportWidth } = useWindowDimensions();
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,13 +32,15 @@ export default function AuthScreen() {
     }
   }
 
+  const contentWidth = Math.min(620, Math.max(280, viewportWidth - 44));
+
   return (
     <KeyboardAvoidingView style={[styles.screen, { backgroundColor: colors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.content}>
+      <View style={[styles.content, Platform.OS === 'web' ? ({ width: 'calc(100vw - 44px)', boxSizing: 'border-box' } as any) : { width: contentWidth }]}>
         <View style={[styles.logo, { backgroundColor: colors.primary }]}><Feather name="layers" size={25} color={colors.primaryForeground} /></View>
         <Text style={[styles.kicker, { color: colors.primary }]}>SHOPFLOW</Text>
         <Text style={[styles.title, { color: colors.foreground }]}>{isRegister ? 'Créer votre boutique' : 'Connexion sécurisée'}</Text>
-        <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Les données financières sont isolées par boutique et les actions sensibles sont auditées.</Text>
+        <Text style={[styles.subtitle, { color: colors.mutedForeground, width: '100%' }]}>Les données financières sont isolées par boutique et les actions sensibles sont auditées.</Text>
         <Spacer size={18} />
         <Card>
           {isRegister ? <Field label="Nom complet" placeholder="Ex. Mireille K." value={fullName} onChangeText={setFullName} autoCapitalize="words" /> : null}
@@ -58,11 +61,11 @@ export default function AuthScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  content: { flex: 1, justifyContent: 'center', paddingHorizontal: 22, gap: 10 },
+  content: { flex: 1, maxWidth: 620, minWidth: 0, alignSelf: 'center', justifyContent: 'center', paddingHorizontal: 22, gap: 10 },
   logo: { width: 54, height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 3 },
   kicker: { fontSize: 12, letterSpacing: 2, fontFamily: 'Inter_700Bold' },
   title: { fontSize: 29, lineHeight: 35, fontFamily: 'Inter_700Bold' },
-  subtitle: { fontSize: 14, lineHeight: 21, fontFamily: 'Inter_400Regular', maxWidth: 420 },
+  subtitle: { fontSize: 14, lineHeight: 21, fontFamily: 'Inter_400Regular', maxWidth: '100%', flexShrink: 1 },
   error: { fontSize: 12, lineHeight: 18, fontFamily: 'Inter_500Medium' },
   switch: { textAlign: 'center', fontSize: 13, fontFamily: 'Inter_600SemiBold', paddingVertical: 10 },
   note: { textAlign: 'center', fontSize: 11, lineHeight: 17, fontFamily: 'Inter_400Regular', marginTop: 10 },

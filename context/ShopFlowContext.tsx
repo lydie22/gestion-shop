@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
 import React, {
   createContext,
   ReactNode,
@@ -12,8 +11,10 @@ import React, {
 } from 'react';
 import { Platform } from 'react-native';
 import { useAuth } from '@/context/AuthContext';
+import { BackendAnomaly, BackendTransaction, shopflowApi } from '@/services/shopflowApi';
 import { enqueueSmsEvent } from '@/services/smsSyncQueue';
 import { readSecureBlob, writeSecureBlob } from '@/services/secureQueueStorage';
+import { getPlatformValue, setPlatformValue } from '@/services/platformStorage';
 
 const STORAGE_KEY = 'shopflow.local.v1';
 const SECURE_DATA_KEY = 'shopflow.data.secure.v1';
@@ -32,12 +33,12 @@ const SECURE_SMS_CHUNK_SIZE = 1500;
 
 async function readProtectedSms(storageKey: string, eventId: string): Promise<string | null> {
   const key = protectedSmsKey(storageKey, eventId);
-  const metadata = await SecureStore.getItemAsync(`${key}.meta`);
+  const metadata = await getPlatformValue(`${key}.meta`);
   if (metadata) {
     try {
       const { count } = JSON.parse(metadata) as { count: number };
       if (Number.isInteger(count) && count >= 0) {
-        const chunks = await Promise.all(Array.from({ length: count }, (_, index) => SecureStore.getItemAsync(`${key}.${index}`)));
+        const chunks = await Promise.all(Array.from({ length: count }, (_, index) => getPlatformValue(`${key}.${index}`)));
         return chunks.every((chunk) => chunk !== null) ? chunks.join('') : null;
       }
     } catch {
@@ -45,14 +46,14 @@ async function readProtectedSms(storageKey: string, eventId: string): Promise<st
     }
   }
   // Compatibilité avec les valeurs créées avant le stockage fragmenté.
-  return SecureStore.getItemAsync(key);
+  return getPlatformValue(key);
 }
 
 async function writeProtectedSms(storageKey: string, eventId: string, rawText: string): Promise<void> {
   const key = protectedSmsKey(storageKey, eventId);
   const chunks = rawText.match(new RegExp(`.{1,${SECURE_SMS_CHUNK_SIZE}}`, 'gs')) ?? [''];
-  await Promise.all(chunks.map((chunk, index) => SecureStore.setItemAsync(`${key}.${index}`, chunk)));
-  await SecureStore.setItemAsync(`${key}.meta`, JSON.stringify({ count: chunks.length }));
+  await Promise.all(chunks.map((chunk, index) => setPlatformValue(`${key}.${index}`, chunk)));
+  await setPlatformValue(`${key}.meta`, JSON.stringify({ count: chunks.length }));
 }
 
 export type Operator = 'Airtel Money' | 'Orange Money' | 'M-Pesa';
@@ -86,7 +87,7 @@ export interface Transaction {
   matchStatus: MatchStatus;
   agent: string;
   note: string;
-  source: 'demo' | 'manual';
+  source: 'manual' | 'server';
   createdAt: string;
   relatedTransactionId?: string;
 }
@@ -150,7 +151,7 @@ export interface SmsEvent {
   reference?: string;
   confidence: 'high' | 'low';
   reconciliation: string;
-  source: 'demo' | 'manual-entry';
+  source: 'manual-entry' | 'server';
 }
 
 export interface AuditEvent {
@@ -177,12 +178,12 @@ export interface ShopSettings {
 }
 
 export interface ShopData {
-  version: 1;
+  version: 2;
   seededAt: string;
   referenceBalances: Record<Operator, number>;
-  referenceMetadata: Record<Operator, { capturedAt: string; source: string; confidence: 'example' | 'manual' }>;
+  referenceMetadata: Record<Operator, { capturedAt: string; source: string; confidence: 'manual' | 'server' }>;
   referenceCashCents: number;
-  referenceCashMetadata: { capturedAt: string; source: string; confidence: 'example' | 'manual' };
+  referenceCashMetadata: { capturedAt: string; source: string; confidence: 'manual' | 'server' };
   transactions: Transaction[];
   cashMovements: CashMovement[];
   cashSessions: CashSession[];
@@ -199,299 +200,29 @@ const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOSt
 const makeId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
-function seedData(): ShopData {
+const emptyData = (): ShopData => {
   const now = new Date().toISOString();
-  const transactions: Transaction[] = [
-    {
-      id: 'demo-tx-01',
-      reference: 'AT-84921',
-      operator: 'Airtel Money',
-      type: 'deposit',
-      amountCents: 5000,
-      feeCents: 0,
-      commissionCents: 50,
-      electronicDeltaCents: 5000,
-      cashDeltaCents: 5000,
-      status: 'confirmed',
-      matchStatus: 'matched',
-      agent: 'Mireille K.',
-      note: 'Exemple de démonstration — entrée validée manuellement.',
-      source: 'demo',
-      createdAt: ago(145),
-    },
-    {
-      id: 'demo-tx-02',
-      reference: 'AT-84922',
-      operator: 'Airtel Money',
-      type: 'withdrawal',
-      amountCents: 2000,
-      feeCents: 100,
-      commissionCents: 35,
-      electronicDeltaCents: -2100,
-      cashDeltaCents: -2000,
-      status: 'confirmed',
-      matchStatus: 'matched',
-      agent: 'Mireille K.',
-      note: 'Frais affichés séparément dans cet exemple.',
-      source: 'demo',
-      createdAt: ago(112),
-    },
-    {
-      id: 'demo-tx-03',
-      reference: 'OM-20418',
-      operator: 'Orange Money',
-      type: 'transfer_in',
-      amountCents: 3200,
-      feeCents: 0,
-      commissionCents: 40,
-      electronicDeltaCents: 3200,
-      cashDeltaCents: 0,
-      status: 'confirmed',
-      matchStatus: 'matched',
-      agent: 'Jonas M.',
-      note: 'Exemple de transfert reçu.',
-      source: 'demo',
-      createdAt: ago(84),
-    },
-    {
-      id: 'demo-tx-04',
-      reference: 'OM-20419',
-      operator: 'Orange Money',
-      type: 'transfer_out',
-      amountCents: 1800,
-      feeCents: 0,
-      commissionCents: 20,
-      electronicDeltaCents: -1800,
-      cashDeltaCents: 0,
-      status: 'confirmed',
-      matchStatus: 'matched',
-      agent: 'Jonas M.',
-      note: 'Exemple de transfert envoyé.',
-      source: 'demo',
-      createdAt: ago(59),
-    },
-    {
-      id: 'demo-tx-05',
-      reference: 'MP-66002',
-      operator: 'M-Pesa',
-      type: 'deposit',
-      amountCents: 800,
-      feeCents: 0,
-      commissionCents: 12,
-      electronicDeltaCents: 800,
-      cashDeltaCents: 800,
-      status: 'confirmed',
-      matchStatus: 'matched',
-      agent: 'Mireille K.',
-      note: 'Exemple de dépôt.',
-      source: 'demo',
-      createdAt: ago(43),
-    },
-    {
-      id: 'demo-tx-06',
-      reference: 'MP-66003',
-      operator: 'M-Pesa',
-      type: 'withdrawal',
-      amountCents: 1500,
-      feeCents: 0,
-      commissionCents: 22,
-      electronicDeltaCents: -1500,
-      cashDeltaCents: -1500,
-      status: 'confirmed',
-      matchStatus: 'matched',
-      agent: 'Jonas M.',
-      note: 'Exemple de retrait.',
-      source: 'demo',
-      createdAt: ago(26),
-    },
-    {
-      id: 'demo-tx-07',
-      reference: 'AT-84923',
-      operator: 'Airtel Money',
-      type: 'transfer_out',
-      amountCents: 2500,
-      feeCents: 0,
-      commissionCents: 0,
-      electronicDeltaCents: -2500,
-      cashDeltaCents: 0,
-      status: 'pending',
-      matchStatus: 'unmatched',
-      agent: 'Jonas M.',
-      note: 'Exemple en attente de confirmation.',
-      source: 'demo',
-      createdAt: ago(12),
-    },
-  ];
-
+  const referenceMetadata = Object.fromEntries(
+    operators.map((operator) => [operator, { capturedAt: '', source: 'Aucune référence enregistrée', confidence: 'manual' as const }]),
+  ) as ShopData['referenceMetadata'];
   return {
-    version: 1,
+    version: 2,
     seededAt: now,
-    referenceBalances: {
-      'Airtel Money': 30000,
-      'Orange Money': 42200,
-      'M-Pesa': 125000,
-    },
-    referenceMetadata: {
-      'Airtel Money': { capturedAt: ago(170), source: 'Exemple fictif', confidence: 'example' },
-      'Orange Money': { capturedAt: ago(170), source: 'Exemple fictif', confidence: 'example' },
-      'M-Pesa': { capturedAt: ago(170), source: 'Exemple fictif', confidence: 'example' },
-    },
-    referenceCashCents: 17000,
-    referenceCashMetadata: { capturedAt: ago(260), source: 'Comptage de démonstration', confidence: 'example' },
-    transactions,
-    cashMovements: [
-      {
-        id: 'demo-cash-01',
-        category: 'expense',
-        amountCents: 3000,
-        deltaCents: -3000,
-        note: 'Fournitures — exemple',
-        status: 'confirmed',
-        createdAt: ago(96),
-        agent: 'Mireille K.',
-      },
-      {
-        id: 'demo-cash-02',
-        category: 'owner_in',
-        amountCents: 3000,
-        deltaCents: 3000,
-        note: 'Apport du propriétaire — exemple',
-        status: 'confirmed',
-        createdAt: ago(94),
-        agent: 'Aline N.',
-      },
-    ],
-    cashSessions: [
-      {
-        id: 'demo-session-01',
-        status: 'closed',
-        openedAt: ago(260),
-        openingCountCents: 20000,
-        openingTheoreticalCents: 20000,
-        closedAt: ago(22),
-        closingCountCents: 19500,
-        closingTheoreticalCents: 20000,
-        varianceCents: -500,
-        explanation: 'Exemple : différence à contrôler, non ajustée automatiquement.',
-        agent: 'Mireille K.',
-      },
-    ],
-    anomalies: [
-      {
-        id: 'demo-an-01',
-        title: 'Écart entre solde théorique et annoncé',
-        type: 'Écart de solde',
-        severity: 'high',
-        status: 'open',
-        description:
-          'Le dernier point annoncé dans cet exemple est de 319,00 USD. Le calcul des mouvements connus donne 329,00 USD. Aucune correction automatique n’a été appliquée.',
-        amountCents: 1000,
-        operator: 'Airtel Money',
-        reference: 'AT-BAL-01',
-        agent: 'À attribuer',
-        createdAt: ago(40),
-        history: [{ at: ago(40), text: 'Dossier de démonstration créé après comparaison de soldes.' }],
-      },
-      {
-        id: 'demo-an-02',
-        title: 'Opération sans confirmation',
-        type: 'Transaction non rapprochée',
-        severity: 'moderate',
-        status: 'open',
-        description:
-          'Une transaction saisie localement ne possède pas encore de preuve ou de référence concordante.',
-        amountCents: 2500,
-        operator: 'Airtel Money',
-        reference: 'AT-84923',
-        agent: 'Jonas M.',
-        createdAt: ago(12),
-        history: [{ at: ago(12), text: 'Saisie locale en attente de vérification.' }],
-      },
-      {
-        id: 'demo-an-03',
-        title: 'Écart de clôture de caisse',
-        type: 'Écart de caisse',
-        severity: 'high',
-        status: 'in_review',
-        description:
-          'Le comptage d’exemple est inférieur de 5,00 USD au montant théorique de la clôture.',
-        amountCents: 500,
-        agent: 'Mireille K.',
-        createdAt: ago(22),
-        history: [{ at: ago(22), text: 'Clôture enregistrée avec une différence de -5,00 USD.' }],
-      },
-      {
-        id: 'demo-an-04',
-        title: 'Format de message à vérifier',
-        type: 'Message inconnu',
-        severity: 'low',
-        status: 'open',
-        description:
-          'Exemple de message dont le format ne permet pas d’extraire des données fiables.',
-        amountCents: 0,
-        agent: 'Appareil local',
-        createdAt: ago(18),
-        history: [{ at: ago(18), text: 'Message conservé en attente d’analyse humaine.' }],
-      },
-    ],
-    smsEvents: [
-      {
-        id: 'demo-sms-01',
-        rawText:
-          'Transaction réussie. Montant : 50 USD Référence : AT-84921 Nouveau solde : 350 USD',
-        receivedAt: ago(145),
-        type: 'Confirmation — exemple fictif',
-        operator: 'Airtel Money',
-        amountCents: 5000,
-        balanceCents: 35000,
-        reference: 'AT-84921',
-        confidence: 'high',
-        reconciliation: 'Correspondance de démonstration par référence ; solde illustratif au moment du message : 350,00 USD.',
-        source: 'demo',
-      },
-      {
-        id: 'demo-sms-02',
-        rawText: 'Solde disponible : 319 USD',
-        receivedAt: ago(40),
-        type: 'Point de solde — exemple fictif',
-        operator: 'Airtel Money',
-        balanceCents: 31900,
-        confidence: 'low',
-        reconciliation: 'Écart de 10,00 USD à examiner ; ce SMS ne crée pas de mouvement.',
-        source: 'demo',
-      },
-    ],
-    auditEvents: [
-      {
-        id: 'demo-audit-01',
-        at: ago(145),
-        actor: 'Mireille K.',
-        action: 'Transaction de démonstration enregistrée',
-        detail: 'AT-84921 · 50,00 USD · source locale illustrative',
-      },
-      {
-        id: 'demo-audit-02',
-        at: ago(22),
-        actor: 'Mireille K.',
-        action: 'Clôture de caisse de démonstration',
-        detail: 'Compté : 195,00 USD · théorique : 200,00 USD · écart conservé',
-      },
-    ],
-    agents: [
-      { id: 'demo-agent-01', name: 'Aline N.', role: 'Propriétaire', register: 'Toutes les caisses', session: 'active' },
-      { id: 'demo-agent-02', name: 'Mireille K.', role: 'Superviseur', register: 'Caisse principale', session: 'active' },
-      { id: 'demo-agent-03', name: 'Jonas M.', role: 'Agent', register: 'Caisse principale', session: 'closed' },
-    ],
-    settings: {
-      shopName: 'Boutique Horizon',
-      currency: 'USD',
-      discrepancyThresholdCents: 500,
-      deviceName: 'Téléphone de boutique',
-    },
+    referenceBalances: { 'Airtel Money': 0, 'Orange Money': 0, 'M-Pesa': 0 },
+    referenceMetadata,
+    referenceCashCents: 0,
+    referenceCashMetadata: { capturedAt: '', source: 'Aucun comptage enregistré', confidence: 'manual' },
+    transactions: [],
+    cashMovements: [],
+    cashSessions: [],
+    anomalies: [],
+    smsEvents: [],
+    auditEvents: [],
+    agents: [],
+    settings: { shopName: 'Boutique', currency: 'USD', discrepancyThresholdCents: 500, deviceName: 'Appareil non enregistré' },
     testChecks: {},
   };
-}
-
+};
 export const transactionTypeLabel: Record<TransactionType, string> = {
   deposit: 'Dépôt',
   withdrawal: 'Retrait',
@@ -572,19 +303,17 @@ interface ShopFlowContextValue {
   closeCashSession: (closingCountCents: number, explanation: string) => void;
   setAnomalyStatus: (id: string, status: 'in_review' | 'resolved', note: string) => void;
   addSmsText: (text: string, operator: Operator, metadata?: { sender?: string; receivedAt?: string }) => void;
-  addAgent: (name: string, role: Agent['role']) => void;
   updateSettings: (patch: Partial<ShopSettings>) => void;
   updateReferenceBalances: (referenceBalances: Record<Operator, number>, referenceCashCents: number, source: string) => void;
   toggleTestCheck: (id: string) => void;
-  resetDemo: () => void;
 }
 
 const ShopFlowContext = createContext<ShopFlowContextValue | null>(null);
 
 export function ShopFlowProvider({ children }: { children: ReactNode }) {
-  const { session } = useAuth();
+  const { session, accessibleShops } = useAuth();
   const storageKey = session ? `${STORAGE_KEY}.${session.shop_id}` : `${STORAGE_KEY}.local`;
-  const [data, setData] = useState<ShopData>(() => seedData());
+  const [data, setData] = useState<ShopData>(() => emptyData());
   const [isReady, setIsReady] = useState(false);
   const [loadedStorageKey, setLoadedStorageKey] = useState<string | null>(null);
   const [storageIssue, setStorageIssue] = useState(false);
@@ -597,7 +326,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
     let active = true;
     setIsReady(false);
     setLoadedStorageKey(null);
-    setData(seedData());
+    setData(emptyData());
     const loadPersistedData = async () => {
       const secureKey = `${SECURE_DATA_KEY}.${storageKey}`;
       const saved = shouldProtectLocalText()
@@ -607,8 +336,8 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
       if (saved) {
         try {
           const parsed = JSON.parse(saved) as ShopData;
-          if (parsed.version === 1 && parsed.transactions && parsed.settings) {
-            const defaults = seedData();
+          if (parsed.version === 2 && parsed.transactions && parsed.settings) {
+            const defaults = emptyData();
             const restored: ShopData = {
               ...defaults,
               ...parsed,
@@ -618,7 +347,6 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
             };
             if (shouldProtectLocalText()) {
               restored.smsEvents = await Promise.all(restored.smsEvents.map(async (event) => {
-                if (event.source === 'demo') return event;
                 const protectedText = await readProtectedSms(storageKey, event.id);
                 return protectedText ? { ...event, rawText: protectedText } : event;
               }));
@@ -632,7 +360,7 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
         } catch {
           skipNextSave.current = true;
           setStorageIssue(true);
-          setData(seedData());
+          setData(emptyData());
         }
       }
       setLoadedStorageKey(storageKey);
@@ -653,6 +381,137 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
   }, [storageKey]);
 
   useEffect(() => {
+    if (!session?.access_token || !isReady || loadedStorageKey !== storageKey) return;
+    let active = true;
+
+    const syncServerSnapshot = async () => {
+      const results = await Promise.allSettled([
+        shopflowApi.listAccounts(session.access_token),
+        shopflowApi.listTransactions(session.access_token),
+        shopflowApi.listAgents(session.access_token),
+        shopflowApi.listAnomalies(session.access_token),
+        shopflowApi.getCashMovements(session.access_token),
+        shopflowApi.getCashSessions(session.access_token),
+        shopflowApi.getAuditLogs(session.access_token),
+      ]);
+      if (!active) return;
+
+      const accounts = results[0].status === 'fulfilled' ? results[0].value : [];
+      const transactions = results[1].status === 'fulfilled' ? results[1].value : [];
+      const agents = results[2].status === 'fulfilled' ? results[2].value : [];
+      const anomalies = results[3].status === 'fulfilled' ? results[3].value : [];
+      const cashMovements = results[4].status === 'fulfilled' ? results[4].value : [];
+      const cashSessions = results[5].status === 'fulfilled' ? results[5].value : [];
+      const auditLogs = results[6].status === 'fulfilled' ? results[6].value : [];
+      const accountOperators = new Map(accounts.map((account) => [account.id, account.operator as Operator]));
+      const agentNames = new Map(agents.map((agent) => [agent.id, agent.name]));
+      const selectedShop = accessibleShops.find((shop) => shop.id === session.shop_id);
+
+      const serverTransactions: Transaction[] = transactions.map((row: BackendTransaction) => {
+        const operator = accountOperators.get(row.account_id) ?? 'Airtel Money';
+        const electronicDelta = ['deposit', 'transfer_out', 'fee'].includes(row.operation_type)
+          ? -row.amount_cents - row.fee_cents
+          : row.amount_cents - row.fee_cents;
+        const cashDelta = row.operation_type === 'deposit' ? row.amount_cents : row.operation_type === 'withdrawal' ? -row.amount_cents : 0;
+        return {
+          id: row.id,
+          reference: row.reference,
+          operator,
+          type: (row.operation_type as TransactionType) || 'adjustment',
+          amountCents: row.amount_cents,
+          feeCents: row.fee_cents,
+          commissionCents: row.commission_expected_cents,
+          electronicDeltaCents: electronicDelta,
+          cashDeltaCents: cashDelta,
+          status: (row.status as TransactionStatus) || 'pending',
+          matchStatus: (row.reconciliation_status as MatchStatus) || 'unmatched',
+          agent: row.agent_id ? (agentNames.get(row.agent_id) ?? 'Agent') : 'Non attribué',
+          note: row.note ?? '',
+          source: 'server',
+          createdAt: row.created_at,
+        };
+      });
+
+      const serverAnomalies: Anomaly[] = anomalies.map((row: BackendAnomaly) => ({
+        id: row.id,
+        title: row.title,
+        type: row.category,
+        severity: (row.severity as Severity) || 'moderate',
+        status: row.status === 'resolved' ? 'resolved' : row.status === 'in_review' ? 'in_review' : 'open',
+        description: row.description,
+        amountCents: row.amount_cents,
+        reference: row.reference,
+        agent: 'À attribuer',
+        createdAt: row.created_at,
+        resolution: row.resolved_at,
+        history: row.history ?? [],
+      }));
+
+      const serverAgents: Agent[] = agents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        role: 'Agent',
+        register: 'À affecter',
+        session: agent.active ? 'active' : 'closed',
+      }));
+
+      const serverCashMovements: CashMovement[] = cashMovements.map((row) => ({
+        id: row.id,
+        category: (row.category as CashMovement['category']) || 'other',
+        amountCents: row.amount_cents,
+        deltaCents: row.delta_cents,
+        note: row.note,
+        status: (row.status as CashMovement['status']) || 'pending',
+        createdAt: row.created_at,
+        agent: agentNames.get(row.created_by) ?? 'Utilisateur serveur',
+        serverId: row.id,
+      }));
+
+      const serverCashSessions: CashSession[] = cashSessions.map((row) => ({
+        id: row.id,
+        status: row.status === 'open' ? 'open' : 'closed',
+        openedAt: row.opened_at,
+        openingCountCents: row.opening_count_cents,
+        openingTheoreticalCents: row.opening_theoretical_cents,
+        openingVarianceCents: row.opening_variance_cents,
+        closingCountCents: row.closing_count_cents,
+        closingTheoreticalCents: row.closing_theoretical_cents,
+        varianceCents: row.variance_cents,
+        openingExplanation: row.opening_note,
+        explanation: row.closing_note,
+        closedAt: row.closed_at,
+        agent: agentNames.get(row.opened_by) ?? 'Utilisateur serveur',
+      }));
+
+      const serverAudit: AuditEvent[] = auditLogs.map((row) => ({
+        id: row.id,
+        at: row.created_at,
+        actor: row.actor_id,
+        action: row.action,
+        detail: [row.entity_type, row.entity_id, row.reason].filter(Boolean).join(' · '),
+      }));
+
+      setData((current) => ({
+        ...current,
+        settings: {
+          ...current.settings,
+          shopName: selectedShop?.name ?? current.settings.shopName,
+          currency: selectedShop?.currency ?? current.settings.currency,
+        },
+        transactions: results[1].status === 'fulfilled' ? serverTransactions : current.transactions,
+        anomalies: results[3].status === 'fulfilled' ? serverAnomalies : current.anomalies,
+        agents: results[2].status === 'fulfilled' ? serverAgents : current.agents,
+        cashMovements: results[4].status === 'fulfilled' ? serverCashMovements : current.cashMovements,
+        cashSessions: results[5].status === 'fulfilled' ? serverCashSessions : current.cashSessions,
+        auditEvents: results[6].status === 'fulfilled' ? serverAudit : current.auditEvents,
+      }));
+    };
+
+    void syncServerSnapshot();
+    return () => { active = false; };
+  }, [accessibleShops, isReady, loadedStorageKey, session?.access_token, session?.shop_id, storageKey]);
+
+  useEffect(() => {
     if (isReady && loadedStorageKey === storageKey) {
       if (skipNextSave.current) {
         skipNextSave.current = false;
@@ -662,10 +521,10 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
       const persist = async () => {
         let persisted = snapshot;
         if (shouldProtectLocalText()) {
-          await Promise.all(snapshot.smsEvents.filter((event) => event.source !== 'demo').map((event) => writeProtectedSms(storageKey, event.id, event.rawText)));
+          await Promise.all(snapshot.smsEvents.map((event) => writeProtectedSms(storageKey, event.id, event.rawText)));
           persisted = {
             ...snapshot,
-            smsEvents: snapshot.smsEvents.map((event) => event.source === 'demo' ? event : { ...event, rawText: '[contenu protégé localement]' }),
+            smsEvents: snapshot.smsEvents.map((event) => ({ ...event, rawText: '[contenu protégé localement]' })),
           };
         }
         if (shouldProtectLocalText()) {
@@ -682,11 +541,10 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
   }, [data, isReady, loadedStorageKey, storageKey]);
 
   // Les événements SMS locaux survivent au redémarrage et sont versés dans la
-  // file réseau dès qu'une session serveur existe. Les exemples fictifs restent
-  // strictement locaux et ne sont jamais envoyés.
+  // file réseau dès qu'une session serveur existe.
   useEffect(() => {
     if (!session || !isReady || loadedStorageKey !== storageKey) return;
-    const pending = data.smsEvents.filter((event) => event.source !== 'demo');
+    const pending = data.smsEvents;
     void Promise.all(pending.map((event) => enqueueSmsEvent(session.shop_id, {
       operator: event.operator ?? 'Opérateur inconnu',
       raw_text: event.rawText,
@@ -1092,24 +950,6 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
     [recordAudit],
   );
 
-  const addAgent = useCallback(
-    (name: string, role: Agent['role']) => {
-      const agent: Agent = {
-        id: makeId('agent'),
-        name: name.trim(),
-        role,
-        register: 'À affecter',
-        session: 'closed',
-      };
-      setData((current) => ({
-        ...current,
-        agents: [...current.agents, agent],
-        auditEvents: recordAudit(current, 'Profil local ajouté', `${agent.name} · ${agent.role}`),
-      }));
-    },
-    [recordAudit],
-  );
-
   const updateSettings = useCallback(
     (patch: Partial<ShopSettings>) => {
       setData((current) => ({
@@ -1160,11 +1000,6 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
     [recordAudit],
   );
 
-  const resetDemo = useCallback(() => {
-    const fresh = seedData();
-    setData(fresh);
-  }, []);
-
   const value = useMemo(
     () => ({
       data,
@@ -1179,11 +1014,9 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
       closeCashSession,
       setAnomalyStatus,
       addSmsText,
-      addAgent,
       updateSettings,
       updateReferenceBalances,
       toggleTestCheck,
-      resetDemo,
     }),
     [
       data,
@@ -1198,11 +1031,9 @@ export function ShopFlowProvider({ children }: { children: ReactNode }) {
       closeCashSession,
       setAnomalyStatus,
       addSmsText,
-      addAgent,
       updateSettings,
       updateReferenceBalances,
       toggleTestCheck,
-      resetDemo,
     ],
   );
 
