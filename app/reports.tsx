@@ -10,6 +10,7 @@ import { CashMovement, getCashBalance, getWalletBalance, operators, Transaction,
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/context/AuthContext';
 import { CommissionSummary, DailyReport, shopflowApi } from '@/services/shopflowApi';
+import { createIdempotencyKey } from '@/services/idempotency';
 
 const localDayKey = (date: string) => {
   const parsed = new Date(date);
@@ -55,6 +56,10 @@ export default function ReportsScreen() {
   const [serverCommissionError, setServerCommissionError] = useState<string | null>(null);
   const [serverDaily, setServerDaily] = useState<DailyReport | null>(null);
   const [serverDailyError, setServerDailyError] = useState<string | null>(null);
+  const [receiptAmount, setReceiptAmount] = useState('');
+  const [receiptReference, setReceiptReference] = useState('');
+  const [receiptProof, setReceiptProof] = useState('');
+  const [receiptSaving, setReceiptSaving] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -91,6 +96,34 @@ export default function ReportsScreen() {
   const serverExpectedCents = serverCommissions?.calculations.reduce((sum, item) => sum + item.expected_cents, 0) ?? 0;
   const serverReceivedCents = serverCommissions?.receipts.reduce((sum, item) => sum + item.amount_cents, 0) ?? 0;
   const serverGapCents = serverExpectedCents - serverReceivedCents;
+
+  async function recordReceipt() {
+    if (!session || receiptSaving) return;
+    const amountCents = Math.round(Number(receiptAmount.replace(',', '.')) * 100);
+    if (!Number.isFinite(amountCents) || amountCents <= 0 || receiptProof.trim().length < 4) {
+      Alert.alert('Preuve incomplète', 'Saisis un montant positif et un justificatif d’au moins quatre caractères.');
+      return;
+    }
+    setReceiptSaving(true);
+    try {
+      await shopflowApi.recordCommissionReceipt({
+        amount_cents: amountCents,
+        source_reference: receiptReference.trim() || undefined,
+        proof_note: receiptProof.trim(),
+        idempotency_key: createIdempotencyKey('commission-receipt'),
+      }, session.access_token);
+      setReceiptAmount('');
+      setReceiptReference('');
+      setReceiptProof('');
+      const refreshed = await shopflowApi.getCommissions(session.access_token);
+      setServerCommissions(refreshed);
+      Alert.alert('Encaissement enregistré', 'La preuve est conservée côté serveur et apparaît dans le rapprochement des commissions.');
+    } catch (cause) {
+      Alert.alert('Enregistrement refusé', cause instanceof Error ? cause.message : 'Le serveur n’a pas pu enregistrer cette preuve.');
+    } finally {
+      setReceiptSaving(false);
+    }
+  }
   const today = todayKey();
   const parsedDay = new Date(`${day}T00:00:00`);
   const validDay = /^\d{4}-\d{2}-\d{2}$/.test(day) &&
@@ -547,6 +580,14 @@ export default function ReportsScreen() {
               </Row>
             </>
           )}
+          {['owner', 'supervisor'].includes(session.role) ? <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, gap: 8 }}>
+            <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>Enregistrer une commission reçue</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>Une preuve d’encaissement ne modifie pas les commissions attendues ; elle documente ce qui a réellement été reçu.</Text>
+            <Field label={`Montant reçu (${data.settings.currency})`} placeholder="0,00" value={receiptAmount} onChangeText={setReceiptAmount} keyboardType="decimal-pad" />
+            <Field label="Référence de preuve (facultatif)" placeholder="Ex. reçu ou transfert" value={receiptReference} onChangeText={setReceiptReference} />
+            <Field label="Justificatif obligatoire" placeholder="Décris la preuve et sa source" value={receiptProof} onChangeText={setReceiptProof} multiline />
+            <Button title="Enregistrer la preuve serveur" icon="check" loading={receiptSaving} onPress={() => void recordReceipt()} />
+          </View> : <Text style={{ color: colors.mutedForeground, fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular' }}>Un agent doit rattacher chaque preuve à une opération qui lui est autorisée.</Text>}
         </Card>
       ) : null}
       {session ? (
